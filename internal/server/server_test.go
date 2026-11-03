@@ -210,3 +210,63 @@ func testSigner(t *testing.T) gossh.Signer {
 	}
 	return s
 }
+
+// A ban must survive a restart when -ban-file is set: same HMAC key, same file.
+func TestBanPersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	banFile := filepath.Join(dir, "bans.json")
+	mk := func() *Server {
+		hub := chat.NewHub(chat.Config{})
+		srv, err := New(hub, Options{Addr: "127.0.0.1:0", HostKeyPath: filepath.Join(dir, "hk"), BanFile: banFile},
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv
+	}
+	addr := &net.TCPAddr{IP: net.ParseIP("203.0.113.7"), Port: 5555}
+
+	s1 := mk()
+	key := s1.addrKey(addr)
+	adm, _ := s1.hub.Connect("admin-key", true)
+	victim, _ := s1.hub.Connect(key, false)
+	s1.hub.Handle(adm, "/ban "+s1.hub.Nick(victim)+" 60")
+	bans, _ := s1.hub.Bans()
+	if err := writeBans(banFile, bans); err != nil { // what persistBans does
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(banFile); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("ban file mode %v, want 0600", fi.Mode().Perm())
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "ban.key")); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("ban key mode %v, want 0600", fi.Mode().Perm())
+	}
+
+	s2 := mk()
+	if s2.addrKey(addr) != key {
+		t.Fatal("address key changed across restart")
+	}
+	if _, err := s2.hub.Connect(s2.addrKey(addr), false); err != chat.ErrBanned {
+		t.Fatalf("ban lost after restart: %v", err)
+	}
+	data, _ := os.ReadFile(banFile)
+	if strings.Contains(string(data), "203.0.113.7") {
+		t.Fatal("raw address written to disk")
+	}
+}
+
+// Without a ban file nothing is persisted and keys change every start.
+func TestEphemeralKeysByDefault(t *testing.T) {
+	mk := func() *Server {
+		srv, err := New(chat.NewHub(chat.Config{}), Options{Addr: "127.0.0.1:0", HostKeyPath: filepath.Join(t.TempDir(), "hk")},
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv
+	}
+	addr := &net.TCPAddr{IP: net.ParseIP("203.0.113.7"), Port: 1}
+	if mk().addrKey(addr) == mk().addrKey(addr) {
+		t.Fatal("address keys are stable across restarts without -ban-file")
+	}
+}

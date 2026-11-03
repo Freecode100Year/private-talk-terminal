@@ -380,3 +380,113 @@ func TestOnionBucket(t *testing.T) {
 		t.Fatalf("banning one Tor user locked out all Tor users: %v", err)
 	}
 }
+
+func TestUnreadCounts(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(b, "/join chinese")
+	h.Handle(b, "一")
+	h.Handle(b, "二")
+	unread := func(c *Client, room string) RoomInfo {
+		for _, r := range h.Status(c).Rooms {
+			if r.Name == room {
+				return r
+			}
+		}
+		t.Fatalf("room %s missing", room)
+		return RoomInfo{}
+	}
+	if got := unread(a, "chinese").Unread; got != 2 {
+		t.Fatalf("unread = %d, want 2", got)
+	}
+	if got := unread(b, "chinese").Unread; got != 0 {
+		t.Fatalf("current room shows unread %d", got)
+	}
+	h.Handle(a, "/join chinese")
+	h.Handle(a, "/leave")
+	if got := unread(a, "chinese").Unread; got != 0 {
+		t.Fatalf("visiting a room should clear unread, got %d", got)
+	}
+	h.Handle(b, "三")
+	if got := unread(a, "chinese").Unread; got != 1 {
+		t.Fatalf("unread after leaving = %d, want 1", got)
+	}
+}
+
+func TestCrossRoomMention(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(a, "/nick 夜猫子")
+	h.Handle(b, "/nick Bob")
+	h.Handle(b, "/join chinese")
+	drain(a)
+	h.Handle(b, "@夜猫子你好，来中文频道")
+	evs := drain(a)
+	if !has(evs, KindMention, "@夜猫子你好") {
+		t.Fatalf("mention without trailing space not delivered: %+v", evs)
+	}
+	for _, r := range h.Status(a).Rooms {
+		if r.Name == "chinese" && !r.Mentioned {
+			t.Fatal("room not flagged as mentioned")
+		}
+	}
+	// people in the same room just see the message, no extra notice
+	h.Handle(a, "/join chinese")
+	drain(a)
+	h.Handle(b, "@夜猫子 again")
+	if has(drain(a), KindMention, "again") {
+		t.Fatal("mention notice sent to someone already in the room")
+	}
+	h.Handle(a, "/leave")
+	// ignoring the sender silences mentions too
+	h.Handle(a, "/ignore Bob")
+	drain(a)
+	h.Handle(b, "@夜猫子 hello?")
+	if has(drain(a), KindMention, "hello?") {
+		t.Fatal("mention from an ignored user delivered")
+	}
+}
+
+func TestMentionNeverLeaksPrivateRoom(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(a, "/nick Alice")
+	h.Handle(b, "/create")
+	drain(a)
+	h.Handle(b, "@Alice secret room talk")
+	if has(drain(a), KindMention, "secret") {
+		t.Fatal("mention from a private room revealed it to an outsider")
+	}
+}
+
+func TestBanListUnbanAndPersistAPI(t *testing.T) {
+	h := newTestHub()
+	adm, _ := h.Connect("ip-admin", true)
+	bad, _ := h.Connect("deadbeefcafe0001", false)
+	_, v0 := h.Bans()
+	h.Handle(adm, "/ban "+h.Nick(bad)+" 30")
+	bans, v1 := h.Bans()
+	if len(bans) != 1 || v1 == v0 {
+		t.Fatalf("ban not recorded/versioned: %v %d %d", bans, v0, v1)
+	}
+	drain(adm)
+	h.Handle(adm, "/bans")
+	if !has(drain(adm), KindInfo, "1 active bans") {
+		t.Fatal("/bans listing missing")
+	}
+	h.Handle(adm, "/unban deadbeef")
+	if bans, _ := h.Bans(); len(bans) != 0 {
+		t.Fatal("/unban failed")
+	}
+	// restore after a "restart"
+	h2 := newTestHub()
+	if n := h2.LoadBans(map[string]time.Time{"k1": time.Now().Add(time.Hour), "old": time.Now().Add(-time.Hour), OnionKey: time.Now().Add(time.Hour)}); n != 1 {
+		t.Fatalf("LoadBans loaded %d, want 1 (expired and onion skipped)", n)
+	}
+	if _, err := h2.Connect("k1", false); err != ErrBanned {
+		t.Fatalf("restored ban not enforced: %v", err)
+	}
+}

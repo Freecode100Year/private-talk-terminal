@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ type Options struct {
 	AdminUser     string // username that authenticates with an admin key (default "admin")
 	OnionAddr     string // optional second listener for a Tor onion service (e.g. 127.0.0.1:2224)
 	OnionMaxTCP   int    // TCP connections allowed through the onion listener (default 400)
+	BanFile       string // optional: persist bans here (see bans.go for the privacy trade-off)
 }
 
 // OnionKey is the shared rate-limit key for everyone arriving via Tor: the
@@ -75,6 +77,7 @@ type Server struct {
 	adminUser string
 	onionAddr string
 	onionMax  int
+	banFile   string
 }
 
 // New builds the SSH server around hub.
@@ -92,6 +95,19 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	}
 	if _, err := rand.Read(s.salt); err != nil {
 		return nil, err
+	}
+	if opt.BanFile != "" {
+		salt, err := loadOrCreateSalt(filepath.Join(filepath.Dir(opt.BanFile), "ban.key"))
+		if err != nil {
+			return nil, fmt.Errorf("ban key: %w", err)
+		}
+		s.salt = salt
+		s.banFile = opt.BanFile
+		bans, err := readBans(opt.BanFile)
+		if err != nil {
+			return nil, fmt.Errorf("ban file: %w", err)
+		}
+		log.Info("ban persistence enabled", "loaded", hub.LoadBans(bans))
 	}
 	if opt.AdminKeysPath != "" {
 		keys, err := loadAuthorizedKeys(opt.AdminKeysPath)
@@ -343,6 +359,16 @@ func (s *Server) Run(ctx context.Context) error {
 			}
 		}()
 	}
+	persistDone := make(chan struct{})
+	pctx, stopPersist := context.WithCancel(context.Background())
+	go func() {
+		defer close(persistDone)
+		s.persistBans(pctx)
+	}()
+	defer func() {
+		stopPersist()
+		<-persistDone // final save before exit
+	}()
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

@@ -146,6 +146,8 @@ func (f Formatter) lines(ev chat.Event) []string {
 		head = ts + f.st(sInfo, "* "+ev.Text)
 	case chat.KindError:
 		head = ts + f.st(sError, "! "+ev.Text)
+	case chat.KindMention:
+		head = ts + f.st(sMention, "@ #"+ev.Room+" <"+ev.From+"> ") + ev.Text + f.st(sDim, "  · /join "+ev.Room)
 	case chat.KindNotice:
 		from := "System"
 		if ev.From != "" {

@@ -37,6 +37,7 @@ func main() {
 		connPerMin  = flag.Int("conn-per-min", 10, "new sessions per address per minute")
 		tcpPerIP    = flag.Int("max-tcp-per-ip", 8, "raw TCP connections per address, including unauthenticated ones")
 		adminUser   = flag.String("admin-user", envOr("PTT_ADMIN_USER", "admin"), "username admins log in with (their key is checked); everyone else never sends a key")
+		banFile     = flag.String("ban-file", envOr("PTT_BAN_FILE", ""), "persist bans across restarts in this file (opt-in; see README for the privacy trade-off)")
 		onionAddr   = flag.String("onion-addr", envOr("PTT_ONION_ADDR", ""), "extra listener for a Tor onion service, e.g. 127.0.0.1:2224 (Tor users share one rate-limit bucket)")
 		msgRate     = flag.Float64("msg-rate", 1, "messages per second allowed (sustained)")
 		msgBurst    = flag.Float64("msg-burst", 5, "message burst size")
@@ -101,6 +102,7 @@ func main() {
 		MaxTCPPerIP:   *tcpPerIP,
 		AdminUser:     *adminUser,
 		OnionAddr:     *onionAddr,
+		BanFile:       *banFile,
 	}, log)
 	if err != nil {
 		log.Error("could not create server", "err", err)

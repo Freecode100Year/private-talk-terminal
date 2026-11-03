@@ -75,6 +75,7 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 | `--domain NAME` | 只用于最后显示的连接命令 |
 | `--version vX.Y.Z` | 安装指定版本 |
 | `--tor` | 同时发布为 Tor 洋葱服务（自动安装 Tor），用户可以不暴露 IP 连接，见下文 |
+| `--persist-bans` | 封禁在重启和升级后依然有效（默认只存在内存里）；`--no-persist-bans` 关闭。隐私上的取舍见“安全与匿名性” |
 | `--from-source` | 从源码编译（会临时下载 Go，结束后删除） |
 | `--no-firewall` | 不改防火墙 |
 
@@ -174,16 +175,19 @@ iSH Shell 是一个在 iOS 上模拟 Linux 环境的免费应用，可以像在�
 
 按键：↑↓ 输入历史，PgUp/PgDn 翻看聊天记录，Tab 补全昵称和命令，Esc 清空输入并回到底部，Ctrl+A/E/U/W/K 行编辑，Ctrl+L 重绘。别人 @ 你的消息会高亮。粘贴多行文字会合并成一行，不会误发。
 
+**多房间未读提示：** 顶部房间栏会显示你不在的房间有多少条新消息，例如 `#chinese 32 +5`。如果有人在那边 @了你，会显示成红色的 `@5`，你当前所在的房间里也会出现一行 `@ #chinese <Bob> …  · /join chinese`，可以直接跳过去。中文昵称后面不加空格也能识别（`@夜猫子你好`）。进入那个房间后计数清零。`/rooms` 也会列出 `(5 new, @you)`。私人房间里的 @ 不会通知房外的人，避免泄露房间的存在。
+
 ### 管理员
 
 用户名填 `admin`，并用安装时登记的私钥连接（`ssh -p 2222 -i ~/.ssh/id_ed25519 admin@HOST`），分隔线上会显示 `[ADMIN]`。只有 `admin` 这个用户名才会检查密钥：管理员的密钥配错了会直接被拒绝，不会悄悄降级成普通用户。
 
 ```
 /kick <nick> [reason]   /mute <nick> [分钟]   /unmute <nick>
-/ban <nick> [分钟]      /unbanall   /broadcast <text>   /topic <text>   /reports
+/ban <nick> [分钟]      /bans   /unban <id>   /unbanall
+/broadcast <text>       /topic <text>   /reports
 ```
 
-封禁对象是“地址”（见下文），只在内存中，重启后清空。
+封禁对象是“地址”的匿名哈希（见下文）。`/bans` 列出封禁的哈希前缀和剩余时间，`/unban <id>` 解除。默认只存在内存里、重启后清空；安装时加 `--persist-bans` 可以让封禁跨重启保留。
 
 ---
 
@@ -193,6 +197,7 @@ iSH Shell 是一个在 iOS 上模拟 Linux 环境的免费应用，可以像在�
 - **不提供 Shell。** 没有 exec、SFTP/SCP、端口转发、代理转发、X11。CI 会在真实服务器上验证这一点。
 - **不记录 IP。** 日志里没有 IP、昵称或消息，第三方库写的日志也会统一过滤掉地址字段。限流和封禁使用“IP 的 HMAC”，密钥只在内存里，每次重启都换；IPv6 按 /64 归并。健康检查接口只返回计数。
 - **客户端根本不会发送公钥。** 正常情况下，SSH 客户端会把你电脑上的公钥逐个“出示”给服务器。GitHub 上每个人的公钥都是公开的，服务器拿来一比对就能认出你是谁。本服务在 SSH 认证的第一步（`none`）就放行普通用户，客户端还没走到出示公钥那一步。只有 `admin` 用户名才会进入密钥认证。可以用 `ssh -v` 验证：输出里是 `Authenticated ... using "none"`，没有 `Offering public key`。CI 里也有对应的测试。
+- **封禁持久化是可选的，而且有代价。** 默认情况下，计算地址哈希用的密钥只在内存里，磁盘上没有任何能和地址关联的东西，但重启后封禁也会消失。开启 `--persist-bans` 后，这个密钥会和封禁列表一起保存在 `/var/lib/ptterm/`（权限 0600，只有服务进程能读），磁盘上只有被封禁地址的哈希，没有 IP，也不涉及其他用户。风险是：如果有人同时拿到了这两个文件，可以穷举 IPv4 地址，反推出**被封禁者**的 IP。看重匿名性就保持默认关闭。
 - **消息不落盘。** 每个房间只在内存保留最近 50 条、最长 1 小时；私人房间清空即销毁；私聊不保存。
 - **终端注入防护。** 昵称和消息里的控制字符、ANSI/OSC 转义序列、Unicode 双向覆盖字符一律剔除。
 - **防滥用。** 每个地址最多 3 个会话、8 个 TCP 连接、每分钟 10 次新连接；消息令牌桶（突发 5 条、每秒 1 条）；重复消息拦截；频繁超限自动禁言；1 小时不发言自动断开。
@@ -257,6 +262,7 @@ ssh -o ProxyCommand="connect -S 127.0.0.1:9150 %h %p" guest@xxxxxxxx.onion
 | `PTT_HEALTH_ADDR` / `-health-addr` | `127.0.0.1:2223` | `GET /healthz`，只返回计数 |
 | `PTT_ADMIN_USER` / `-admin-user` | `admin` | 管理员登录用的用户名 |
 | `PTT_ONION_ADDR` / `-onion-addr` | — | 给 Tor 洋葱服务用的本地监听地址（`--tor` 自动设为 `127.0.0.1:2224`） |
+| `PTT_BAN_FILE` / `-ban-file` | — | 封禁持久化文件（`--persist-bans` 设为 `/var/lib/ptterm/bans.json`） |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | 连接限制 |
 | `-msg-rate` / `-msg-burst` / `-max-len` | 1/s / 5 / 500 | 发言限制 |
@@ -288,7 +294,7 @@ internal/chat/              房间、身份、私聊、历史、限流、封禁�
 internal/ui/term.go         完整界面：轻量终端渲染器 + 按键解码
 internal/ui/plain.go        纯文本行模式
 internal/ui/format.go       消息格式、时区、@提及
-internal/server/            Wish SSH 网关、认证、连接限制
+internal/server/            Wish SSH 网关、认证、连接限制、封禁持久化
 cmd/ptt-bench/              压测工具
 deploy/                     systemd 单元（由 install.sh --print-unit 生成）和配置示例
 ```
@@ -300,5 +306,6 @@ deploy/                     systemd 单元（由 install.sh --print-unit 生成�
 - [x] 一键安装 / 升级 / 卸载，CI，自动发布，压测
 - [x] 普通用户不发送公钥，日志过滤地址，Tor 洋葱服务
 - [x] 单核约 2000 名完整界面用户
-- [ ] 封禁持久化（可选）、多房间未读提示
+- [x] 封禁持久化（可选）、`/bans` 与 `/unban`
+- [x] 多房间未读提示、跨房间 @提及通知
 - [ ] 与 Private-Talk 打通。普通 SSH 客户端无法端到端加密；要让服务器读不到内容，必须在用户本地有专用加密客户端。

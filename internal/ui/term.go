@@ -127,7 +127,7 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 		t.flush()
 	}()
 
-	tick := time.NewTicker(15 * time.Second)
+	tick := time.NewTicker(5 * time.Second) // clock, online count, unread counts
 	defer tick.Stop()
 	for {
 		select {
@@ -387,14 +387,26 @@ func (t *Term) roomsLine() string {
 	b.WriteString(sDim.R("ROOMS "))
 	for _, r := range t.status.Rooms {
 		item := fmt.Sprintf("%s %d", r.Label, r.Users)
-		if r.Current {
+		switch {
+		case r.Current:
 			b.WriteString(sCurRoom.R("▸" + item))
-		} else {
+		case r.Mentioned:
+			b.WriteString(" " + item + sError.R(fmt.Sprintf(" @%s", unreadLabel(r.Unread))))
+		case r.Unread > 0:
+			b.WriteString(" " + item + sNotice.R(" +"+unreadLabel(r.Unread)))
+		default:
 			b.WriteString(" " + item)
 		}
 		b.WriteString("  ")
 	}
 	return truncate(b.String(), t.width, "…")
+}
+
+func unreadLabel(n int) string {
+	if n > 99 {
+		return "99+"
+	}
+	return fmt.Sprint(n)
 }
 
 func (t *Term) drawSeparator() {

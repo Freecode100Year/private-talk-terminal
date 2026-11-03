@@ -32,6 +32,7 @@ VERSION="${PTT_VERSION:-latest}"
 FROM_SOURCE=0
 FIREWALL=1
 TOR=0
+PERSIST_BANS=""
 PURGE=0
 ROOMS=""
 DOMAIN=""
@@ -78,6 +79,8 @@ Options
   --version vX.Y.Z   install a specific release (default: latest)
   --tor              also publish the chat as a Tor onion service, so users can
                      connect without the server ever seeing their IP address
+  --persist-bans     keep bans across restarts (stores a hash key on disk; see README)
+  --no-persist-bans  turn that off again (default: bans live in memory only)
   --from-source      build from source instead of downloading a release
   --no-firewall      don't touch ufw/firewalld/iptables
   --purge            with uninstall: also delete config, host key and admins
@@ -113,6 +116,8 @@ parse_args() {
 		--version=*) VERSION=${1#*=}; shift ;;
 		--from-source) FROM_SOURCE=1; shift ;;
 		--tor) TOR=1; shift ;;
+		--persist-bans) PERSIST_BANS=on; shift ;;
+		--no-persist-bans) PERSIST_BANS=off; shift ;;
 		--no-firewall) FIREWALL=0; shift ;;
 		--purge) PURGE=1; shift ;;
 		--print-unit) CMD=print-unit; shift ;;
@@ -345,6 +350,10 @@ GOMEMLIMIT=$(mem_limit)
 # Public rooms, first one is the lobby. Empty = built-in defaults.
 #PTT_ROOMS=general:大厅 Lobby,chinese:中文频道,english:English,technology:技术,anonymous:随便聊
 
+# Keep bans across restarts (install.sh --persist-bans). Off by default: it
+# stores the address-hash key on disk next to the ban list.
+#PTT_BAN_FILE=/var/lib/ptterm/bans.json
+
 # Extra welcome lines shown on connect (a text file).
 #PTT_MOTD=/etc/ptterm/motd.txt
 
@@ -357,6 +366,13 @@ EOF
 		set_env PTT_ADDR ":$PORT"
 	fi
 	[ -n "$ROOMS" ] && set_env PTT_ROOMS "$ROOMS"
+	case "$PERSIST_BANS" in
+	on) set_env PTT_BAN_FILE "$STATE_DIR/bans.json" ;;
+	off)
+		sed -i '/^PTT_BAN_FILE=/d' "$ENV_FILE"
+		rm -f /var/lib/private/ptterm/ban.key /var/lib/private/ptterm/bans.json "$STATE_DIR/ban.key" "$STATE_DIR/bans.json"
+		;;
+	esac
 	PORT=$(current_port)
 	PORT=${PORT:-2222}
 }

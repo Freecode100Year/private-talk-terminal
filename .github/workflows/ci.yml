@@ -120,6 +120,18 @@ jobs:
           ss -ltn > /tmp/ss.txt
           grep -q '127.0.0.1:2224 ' /tmp/ss.txt
 
+      - name: Persistent bans
+        run: |
+          exec > >(tee -a /tmp/ci-logs/persist-bans.log) 2>&1
+          set -x
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --persist-bans
+          sudo journalctl -u ptterm -n 20 --no-pager > /tmp/j.txt
+          grep -q "ban persistence enabled" /tmp/j.txt
+          sudo test -f /var/lib/ptterm/ban.key
+          test "$(sudo stat -c %a /var/lib/ptterm/ban.key)" = 600
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --no-persist-bans
+          sudo test ! -e /var/lib/ptterm/ban.key
+
       - name: Status, reinstall, uninstall
         run: |
           exec > >(tee -a /tmp/ci-logs/status-reinstall-uninstall.log) 2>&1

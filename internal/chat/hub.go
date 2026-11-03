@@ -16,20 +16,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 // Kind classifies an Event so front-ends can style it.
 type Kind int
 
 const (
-	KindChat   Kind = iota // <nick> text
-	KindAction             // * nick does something
-	KindSystem             // joins, leaves, nick changes
-	KindDMIn               // private message received
-	KindDMOut              // private message sent (echo to sender)
-	KindInfo               // command output for this user only
-	KindError              // command error for this user only
-	KindNotice             // admin broadcast
+	KindChat    Kind = iota // <nick> text
+	KindAction              // * nick does something
+	KindSystem              // joins, leaves, nick changes
+	KindDMIn                // private message received
+	KindDMOut               // private message sent (echo to sender)
+	KindInfo                // command output for this user only
+	KindError               // command error for this user only
+	KindNotice              // admin broadcast
+	KindMention             // someone @mentioned you in a room you're not in
 )
 
 // Event is one line (or block) of output for a client.
@@ -135,6 +137,7 @@ type room struct {
 	private bool
 	members map[uint64]*Client
 	history []Event
+	seq     uint64 // chat/action messages ever posted, for unread counts
 }
 
 // Client is one connected session.
@@ -165,6 +168,8 @@ type Client struct {
 	lastActive  time.Time
 	ignores     map[uint64]bool
 	loc         *time.Location
+	seen        map[string]uint64 // room -> room.seq when the client last left/joined it
+	mentioned   map[string]bool   // rooms where the client was @mentioned while away
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -205,6 +210,7 @@ type Hub struct {
 	connLog  map[string][]time.Time
 	reports  []string
 	eventID  uint64
+	banVer   uint64 // bumped on every ban change, for persistence
 	shutdown bool
 }
 
@@ -245,7 +251,10 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 		if now.Before(until) && !admin {
 			return nil, ErrBanned
 		}
-		delete(h.bans, ipKey)
+		if !now.Before(until) {
+			delete(h.bans, ipKey)
+			h.banVer++
+		}
 	}
 	if !admin {
 		maxConns, perMin := h.cfg.MaxConnsPerIP, h.cfg.ConnPerMinute
@@ -279,6 +288,11 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 		lastActive: now,
 		ignores:    map[uint64]bool{},
 		loc:        time.Local,
+		seen:       map[string]uint64{},
+		mentioned:  map[string]bool{},
+	}
+	for _, name := range h.public { // unread counts start from "now"
+		c.seen[name] = h.rooms[name].seq
 	}
 	c.Out, c.Done = c.out, c.done
 	c.nick = h.freeNickLocked()
@@ -349,6 +363,7 @@ func (h *Hub) Janitor() {
 	for k, until := range h.bans {
 		if now.After(until) {
 			delete(h.bans, k)
+			h.banVer++
 		}
 	}
 	if h.cfg.IdleKick > 0 {
@@ -455,7 +470,7 @@ func (h *Hub) command(c *Client, line string) Result {
 	case "whoami":
 		h.infof(c, "You are %s in %s.", c.nick, h.roomLabel(c.room))
 	// --- admin ---
-	case "kick", "mute", "unmute", "ban", "unbanall", "broadcast", "announce", "topic", "reports":
+	case "kick", "mute", "unmute", "ban", "unbanall", "bans", "unban", "broadcast", "announce", "topic", "reports":
 		if !c.admin {
 			h.errorf(c, "Unknown command /%s — try /help", cmd)
 			return Result{}
@@ -480,6 +495,7 @@ func (h *Hub) helpLocked(c *Client) {
 		"/ignore <nick>         屏蔽某人（/unignore 取消）· hide someone",
 		"/report <nick> <why>   举报给管理员 · report to moderators",
 		"/tz <zone>             时区，如 /tz Asia/Shanghai 或 /tz +8 · timezone",
+		"房间栏 +N = 其他房间的未读消息，@N = 有人在那边 @了你 · +N unread, @N mentioned",
 		"/clear                 清屏 · clear screen",
 		"/quit                  退出 · disconnect",
 		"//text                 发送以 / 开头的文字 · send a literal '/'",
@@ -490,6 +506,7 @@ func (h *Hub) helpLocked(c *Client) {
 			"/kick <nick> [reason]  /mute <nick> [min]  /unmute <nick>",
 			"/ban <nick> [min]      /unbanall  /broadcast <text>  /topic <text>",
 			"/reports               最近的举报 · recent reports",
+			"/bans                  封禁列表 · list bans    /unban <id>  解封",
 		)
 	}
 	c.send(&Event{Kind: KindInfo, Text: "Commands · 命令", Lines: lines})
@@ -503,7 +520,15 @@ func (h *Hub) roomsLocked(c *Client) {
 		if c.room == name {
 			mark = "▸ "
 		}
-		lines = append(lines, fmt.Sprintf("%s#%-12s %3d users   %s", mark, name, len(r.members), r.topic))
+		extra := ""
+		if n := r.seq - c.seen[name]; c.room != name && n > 0 {
+			extra = fmt.Sprintf("  (%d new", n)
+			if c.mentioned[name] {
+				extra += ", @you"
+			}
+			extra += ")"
+		}
+		lines = append(lines, fmt.Sprintf("%s#%-12s %3d users   %s%s", mark, name, len(r.members), r.topic, extra))
 	}
 	if r := h.rooms[c.room]; r != nil && r.private {
 		lines = append(lines, fmt.Sprintf("▸ %s (private) %d users", h.roomLabel(c.room), len(r.members)))
@@ -558,12 +583,15 @@ func (h *Hub) cmdCreateLocked(c *Client) {
 
 func (h *Hub) joinLocked(c *Client, name string) {
 	if old := h.rooms[c.room]; old != nil {
+		c.seen[old.name] = old.seq
 		delete(old.members, c.ID)
 		h.roomSystemLocked(old, fmt.Sprintf("%s left for another room.", c.nick))
 		h.gcRoomLocked(old)
 	}
 	r := h.rooms[name]
 	c.room = name
+	c.seen[name] = r.seq
+	delete(c.mentioned, name)
 	r.history = h.pruneHistory(r.history, time.Now())
 	for _, ev := range r.history {
 		e := ev
@@ -607,6 +635,7 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 		return
 	}
 	r := h.rooms[c.room]
+	r.seq++
 	h.eventID++
 	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text}
 	r.history = append(r.history, *ev)
@@ -617,6 +646,43 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 		if !m.ignores[c.ID] {
 			m.send(ev)
 		}
+	}
+	if !r.private { // never reveal a private room to someone outside it
+		h.notifyMentionsLocked(c, r, ev)
+	}
+}
+
+// notifyMentionsLocked tells people @mentioned in a room they aren't in. It
+// only looks up the @words in the text, so it costs nothing for messages
+// without mentions regardless of how many users are online.
+func (h *Hub) notifyMentionsLocked(c *Client, r *room, ev *Event) {
+	notified := map[uint64]bool{}
+	rest := ev.Text
+	for len(notified) < 5 {
+		i := strings.IndexByte(rest, '@')
+		if i < 0 {
+			break
+		}
+		rest = rest[i+1:]
+		// Chinese text often has no space after a name ("@夜猫子你好"), so
+		// take the longest prefix (max 16 runes) that is an online nick.
+		var cand []rune
+		for _, ru := range rest {
+			if len(cand) == 16 || ru == '@' || unicode.IsSpace(ru) || unicode.IsPunct(ru) && ru != '_' && ru != '-' {
+				break
+			}
+			cand = append(cand, ru)
+		}
+		var t *Client
+		for n := len(cand); n >= 2 && t == nil; n-- {
+			t = h.byNick[strings.ToLower(string(cand[:n]))]
+		}
+		if t == nil || t == c || notified[t.ID] || r.members[t.ID] != nil || t.ignores[c.ID] {
+			continue
+		}
+		notified[t.ID] = true
+		t.mentioned[r.name] = true
+		t.send(&Event{Time: ev.Time, Kind: KindMention, Room: r.name, From: c.nick, Text: ev.Text})
 	}
 }
 
@@ -729,7 +795,36 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 	case "unbanall":
 		n := len(h.bans)
 		h.bans = map[string]time.Time{}
+		h.banVer++
 		h.infof(c, "Cleared %d bans.", n)
+		return
+	case "bans":
+		if len(h.bans) == 0 {
+			h.infof(c, "No active bans. 当前没有封禁。")
+			return
+		}
+		keys := make([]string, 0, len(h.bans))
+		for k := range h.bans {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool { return h.bans[keys[i]].Before(h.bans[keys[j]]) })
+		var lines []string
+		for _, k := range keys {
+			lines = append(lines, fmt.Sprintf("  %s   %s left", banID(k), time.Until(h.bans[k]).Round(time.Minute)))
+		}
+		c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("%d active bans (id = anonymous address hash) · /unban <id>", len(keys)), Lines: lines})
+		return
+	case "unban":
+		id := strings.ToLower(strings.TrimSpace(rest))
+		for k := range h.bans {
+			if id != "" && banID(k) == id {
+				delete(h.bans, k)
+				h.banVer++
+				h.infof(c, "Unbanned %s.", id)
+				return
+			}
+		}
+		h.errorf(c, "No ban with id %q — see /bans", id)
 		return
 	case "reports":
 		if len(h.reports) == 0 {
@@ -784,6 +879,7 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 			minutes = 60
 		}
 		h.bans[t.ipKey] = time.Now().Add(time.Duration(minutes) * time.Minute)
+		h.banVer++
 		key := t.ipKey
 		for _, o := range h.clients {
 			if o.ipKey == key && !o.admin {
@@ -1054,11 +1150,13 @@ func randomCode(n int) string {
 
 // RoomInfo is one row of the room sidebar.
 type RoomInfo struct {
-	Name    string
-	Label   string
-	Users   int
-	Current bool
-	Private bool
+	Name      string
+	Label     string
+	Users     int
+	Current   bool
+	Private   bool
+	Unread    int  // messages since the client last looked at this room
+	Mentioned bool // someone @mentioned the client there meanwhile
 }
 
 // Status is a snapshot for rendering headers and sidebars.
@@ -1098,7 +1196,13 @@ func (h *Hub) Status(c *Client) Status {
 		}
 	}
 	for _, name := range h.public {
-		s.Rooms = append(s.Rooms, RoomInfo{Name: name, Label: "#" + name, Users: len(h.rooms[name].members), Current: name == c.room})
+		r := h.rooms[name]
+		ri := RoomInfo{Name: name, Label: "#" + name, Users: len(r.members), Current: name == c.room}
+		if !ri.Current {
+			ri.Unread = int(r.seq - c.seen[name])
+			ri.Mentioned = c.mentioned[name]
+		}
+		s.Rooms = append(s.Rooms, ri)
 	}
 	if r := h.rooms[c.room]; r != nil && r.private {
 		s.Rooms = append(s.Rooms, RoomInfo{Name: r.name, Label: h.roomLabel(r.name), Users: len(r.members), Current: true, Private: true})
@@ -1152,4 +1256,41 @@ func (h *Hub) Stats() Stats {
 		}
 	}
 	return st
+}
+
+func banID(key string) string {
+	if len(key) > 8 {
+		return key[:8]
+	}
+	return key
+}
+
+// Bans returns a copy of the active bans and a version number that changes
+// whenever they do, so a persister can save only when needed.
+func (h *Hub) Bans() (map[string]time.Time, uint64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[string]time.Time, len(h.bans))
+	now := time.Now()
+	for k, v := range h.bans {
+		if v.After(now) {
+			out[k] = v
+		}
+	}
+	return out, h.banVer
+}
+
+// LoadBans installs previously saved bans (expired ones are skipped).
+func (h *Hub) LoadBans(b map[string]time.Time) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	now := time.Now()
+	for k, v := range b {
+		if v.After(now) && k != OnionKey {
+			h.bans[k] = v
+			n++
+		}
+	}
+	return n
 }
