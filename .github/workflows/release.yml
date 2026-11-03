@@ -1,8 +1,14 @@
 name: Release
 
+# Two ways to publish:
+#   • push a tag vX.Y.Z, or
+#   • bump the VERSION file on main — a release vX.Y.Z is created if it
+#     doesn't exist yet.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths: [VERSION]
 
 permissions:
   contents: write
@@ -13,19 +19,39 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Decide version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            V="$GITHUB_REF_NAME"
+          else
+            V="v$(tr -d ' \n' < VERSION)"
+          fi
+          [[ "$V" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "bad version $V"; exit 1; }
+          if gh release view "$V" >/dev/null 2>&1; then
+            echo "release $V already exists — nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v6
+        if: steps.v.outputs.skip != 'true'
         with:
           go-version-file: go.mod
 
       - name: Test
+        if: steps.v.outputs.skip != 'true'
         run: |
           go mod verify
           go test -count=1 ./...
 
       - name: Build
+        if: steps.v.outputs.skip != 'true'
         run: |
           set -e
-          V="${GITHUB_REF_NAME}"
+          V="${{ steps.v.outputs.version }}"
           FLAGS="-trimpath -ldflags=-s -ldflags=-w -ldflags=-X=main.version=${V}"
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64        go build $FLAGS -o dist/ptterm-linux-amd64 .
@@ -36,8 +62,10 @@ jobs:
           ./dist/ptterm-linux-amd64 -version
 
       - name: Publish
+        if: steps.v.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.v.outputs.version }}
         run: |
           cat > notes.md <<'EOF'
           ## 一键安装 · One-line install
@@ -50,4 +78,4 @@ jobs:
 
           Binaries: `ptterm-linux-amd64` (x86_64), `ptterm-linux-arm64` (ARM64 e.g. Oracle Ampere), `ptterm-linux-armv7`. Verify with `SHA256SUMS`.
           EOF
-          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+          gh release create "$V" dist/* --target "$GITHUB_SHA" --title "$V" --notes-file notes.md --generate-notes

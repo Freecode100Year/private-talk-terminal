@@ -188,7 +188,7 @@ make dist      # 交叉编译 amd64 / arm64 / armv7 + SHA256SUMS
 make bench     # 压测
 ```
 
-需要 Go 1.26.8+。发布流程：推送 `vX.Y.Z` 标签，GitHub Actions 自动测试、构建三种架构并发布 Release（附 `SHA256SUMS`）。每次推送 main 时，CI 会用 Go 官方校验数据库验证依赖，并在带 systemd 的 Ubuntu 上实际执行一遍安装脚本：安装、聊天、确认拒绝 exec、改端口、卸载。
+需要 Go 1.26.8+。发布流程：修改 `VERSION` 文件（如 `0.2.1`）并推送到 main，或者推送 `vX.Y.Z` 标签，GitHub Actions 会自动测试、构建三种架构并发布 Release（附 `SHA256SUMS`）。服务器上执行 `sudo ptterm-ctl upgrade` 即可升级。每次推送 main 时，CI 会用 Go 官方校验数据库验证依赖，并在带 systemd 的 Ubuntu 上实际执行一遍安装脚本：安装、聊天、确认拒绝 exec、改端口、卸载。
 
 ```
 main.go                     参数、健康检查、优雅退出
