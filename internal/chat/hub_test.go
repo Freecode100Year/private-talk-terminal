@@ -11,7 +11,7 @@ func drain(c *Client) []Event {
 	for {
 		select {
 		case ev := <-c.Out:
-			out = append(out, ev)
+			out = append(out, *ev)
 		default:
 			return out
 		}
@@ -351,5 +351,32 @@ func TestStatsHasNoIdentities(t *testing.T) {
 	st := h.Stats()
 	if st.Online != 1 || st.Rooms != 5 {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestOnionBucket(t *testing.T) {
+	h := NewHub(Config{MaxConnsPerIP: 2, OnionMaxConns: 5, OnionPerMin: 100})
+	for i := 0; i < 5; i++ {
+		if _, err := h.Connect(OnionKey, false); err != nil {
+			t.Fatalf("onion session %d refused: %v", i, err)
+		}
+	}
+	if _, err := h.Connect(OnionKey, false); err != ErrTooManyConns {
+		t.Fatalf("onion cap not enforced: %v", err)
+	}
+	adm, _ := h.Connect("ip-admin", true)
+	h.mu.Lock()
+	var victim *Client
+	for _, c := range h.clients {
+		if c.ipKey == OnionKey {
+			victim = c
+			break
+		}
+	}
+	h.mu.Unlock()
+	h.Handle(adm, "/ban "+h.Nick(victim))
+	<-victim.Done
+	if _, err := h.Connect(OnionKey, false); err != nil {
+		t.Fatalf("banning one Tor user locked out all Tor users: %v", err)
 	}
 }

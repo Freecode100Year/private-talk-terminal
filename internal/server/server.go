@@ -3,9 +3,10 @@
 // Security posture:
 //   - No shell, no exec, no SFTP/SCP, no port/agent/X11 forwarding: the only
 //     thing an SSH session can reach is the chat UI.
-//   - Anonymous login: any username, no password. Public keys are only
-//     accepted when they are listed as admin keys; everyone else falls
-//     through to an empty keyboard-interactive exchange.
+//   - Anonymous login: any username, no password. Ordinary users are let in
+//     at the SSH "none" authentication step, so their client never offers a
+//     public key — keys are linkable identities (e.g. github.com/<user>.keys).
+//     Only the admin username goes on to public-key authentication.
 //   - Client IP addresses are never logged or stored. Rate limits and bans
 //     use an HMAC of the address (IPv6 grouped by /64) under a random key
 //     that only lives in memory and changes on every restart.
@@ -45,8 +46,15 @@ type Options struct {
 	IdleTimeout   time.Duration // disconnect after this long without traffic
 	MaxTimeout    time.Duration // absolute session limit (0 = none)
 	Banner        string
-	MaxTCPPerIP   int // raw TCP connections per address, incl. unauthenticated (default 8)
+	MaxTCPPerIP   int    // raw TCP connections per address, incl. unauthenticated (default 8)
+	AdminUser     string // username that authenticates with an admin key (default "admin")
+	OnionAddr     string // optional second listener for a Tor onion service (e.g. 127.0.0.1:2224)
+	OnionMaxTCP   int    // TCP connections allowed through the onion listener (default 400)
 }
+
+// OnionKey is the shared rate-limit key for everyone arriving via Tor: the
+// server can't tell onion users apart, which is the point.
+const OnionKey = chat.OnionKey
 
 type ctxKey int
 
@@ -63,13 +71,24 @@ type Server struct {
 	tcpMu    sync.Mutex
 	tcpConns map[string]int
 	tcpMax   int
+
+	adminUser string
+	onionAddr string
+	onionMax  int
 }
 
 // New builds the SSH server around hub.
 func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
-	s := &Server{hub: hub, log: log, salt: make([]byte, 32), tcpConns: map[string]int{}, tcpMax: opt.MaxTCPPerIP}
+	s := &Server{hub: hub, log: log, salt: make([]byte, 32), tcpConns: map[string]int{}, tcpMax: opt.MaxTCPPerIP,
+		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP}
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
+	}
+	if s.adminUser == "" {
+		s.adminUser = "admin"
+	}
+	if s.onionMax <= 0 {
+		s.onionMax = 400
 	}
 	if _, err := rand.Read(s.salt); err != nil {
 		return nil, err
@@ -87,13 +106,28 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 		wish.WithAddress(opt.Addr),
 		wish.WithHostKeyPath(opt.HostKeyPath),
 		wish.WithVersion("PrivateTalk"),
-		wish.WithPublicKeyAuth(func(_ ssh.Context, key ssh.PublicKey) bool {
-			return s.isAdmin(key)
+		// Only reached by the admin username (everyone else is accepted at
+		// "none"): require a listed key, refuse every other method.
+		wish.WithPublicKeyAuth(func(ctx ssh.Context, key ssh.PublicKey) bool {
+			return s.isAdminUser(ctx.User()) && s.isAdmin(key)
 		}),
-		wish.WithKeyboardInteractiveAuth(func(ssh.Context, gossh.KeyboardInteractiveChallenge) bool {
-			return true
+		wish.WithKeyboardInteractiveAuth(func(ctx ssh.Context, _ gossh.KeyboardInteractiveChallenge) bool {
+			return !s.isAdminUser(ctx.User())
 		}),
-		wish.WithPasswordAuth(func(ssh.Context, string) bool { return true }),
+		func(srv *ssh.Server) error {
+			srv.ServerConfigCallback = func(ssh.Context) *gossh.ServerConfig {
+				return &gossh.ServerConfig{
+					NoClientAuth: true,
+					NoClientAuthCallback: func(cm gossh.ConnMetadata) (*gossh.Permissions, error) {
+						if s.isAdminUser(cm.User()) {
+							return nil, errors.New("admin login requires a key")
+						}
+						return nil, nil
+					},
+				}
+			}
+			return nil
+		},
 		wish.WithMiddleware(
 			s.uiHandler,         // innermost: full-screen or plain UI
 			s.sessionMiddleware, // outermost, runs first
@@ -126,6 +160,10 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 // Hub returns the chat hub.
 func (s *Server) Hub() *chat.Hub { return s.hub }
 
+func (s *Server) isAdminUser(u string) bool {
+	return len(s.admins) > 0 && strings.EqualFold(u, s.adminUser)
+}
+
 func (s *Server) isAdmin(key ssh.PublicKey) bool {
 	if key == nil || len(s.admins) == 0 {
 		return false
@@ -141,6 +179,27 @@ func (s *Server) isAdmin(key ssh.PublicKey) bool {
 
 // addrKey turns a remote address into an opaque key. IPv6 is grouped by /64
 // so a single host can't dodge limits by rotating through its prefix.
+func (s *Server) isOnion(local net.Addr) bool {
+	return s.onionAddr != "" && local != nil && sameAddr(local.String(), s.onionAddr)
+}
+
+func sameAddr(a, b string) bool {
+	ah, ap, err1 := net.SplitHostPort(a)
+	bh, bp, err2 := net.SplitHostPort(b)
+	if err1 != nil || err2 != nil || ap != bp {
+		return false
+	}
+	return ah == bh || bh == "" || bh == "0.0.0.0" || bh == "::"
+}
+
+// keyFor returns the rate-limit key for a connection.
+func (s *Server) keyFor(local, remote net.Addr) string {
+	if s.isOnion(local) {
+		return OnionKey
+	}
+	return s.addrKey(remote)
+}
+
 func (s *Server) addrKey(addr net.Addr) string {
 	host := addr.String()
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -169,8 +228,8 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 			wish.Fatalln(sess, "This server only offers the chat room. Connect without a command:  ssh -p 2222 guest@<host>")
 			return
 		}
-		admin := s.isAdmin(sess.PublicKey())
-		c, err := s.hub.Connect(s.addrKey(sess.RemoteAddr()), admin)
+		admin := s.isAdminUser(sess.User()) && s.isAdmin(sess.PublicKey())
+		c, err := s.hub.Connect(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin)
 		if err != nil {
 			wish.Fatalln(sess, "Sorry: "+err.Error())
 			return
@@ -181,15 +240,8 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 		sess.Context().SetValue(clientKey, c)
 		defer s.hub.Disconnect(c)
 
-		// If the hub drops the client (kick/ban), close the SSH session too.
-		go func() {
-			select {
-			case <-c.Done:
-				time.Sleep(500 * time.Millisecond) // let the UI print the reason
-				_ = sess.Close()
-			case <-sess.Context().Done():
-			}
-		}()
+		// Both UIs return when the hub drops the client (kick/ban/idle),
+		// which ends the session — no watcher goroutine per session needed.
 		next(sess)
 	}
 }
@@ -197,10 +249,14 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 // limitConn caps raw TCP connections per address, so nobody can hold
 // hundreds of idle or half-open connections without ever opening a session.
 func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
-	key := s.addrKey(conn.RemoteAddr())
+	key := s.keyFor(conn.LocalAddr(), conn.RemoteAddr())
+	limit := s.tcpMax
+	if key == OnionKey {
+		limit = s.onionMax
+	}
 	s.tcpMu.Lock()
 	defer s.tcpMu.Unlock()
-	if s.tcpConns[key] >= s.tcpMax {
+	if s.tcpConns[key] >= limit {
 		return nil
 	}
 	s.tcpConns[key]++
@@ -258,25 +314,7 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 			return
 		}
 		pty, winCh, _ := sess.Pty()
-		resize := make(chan ui.WindowSize, 1)
-		go func() {
-			for {
-				select {
-				case w, ok := <-winCh:
-					if !ok {
-						return
-					}
-					select { // keep only the latest size
-					case <-resize:
-					default:
-					}
-					resize <- ui.WindowSize{Width: w.Width, Height: w.Height}
-				case <-sess.Context().Done():
-					return
-				}
-			}
-		}()
-		msg := ui.RunTerm(sess, s.hub, c, pty.Window.Width, pty.Window.Height, resize)
+		msg := ui.RunTerm(sess, s.hub, c, pty.Window.Width, pty.Window.Height, winCh)
 		if msg != "" {
 			_, _ = io.WriteString(sess, msg+"\r\n")
 		}
@@ -287,13 +325,24 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
 func (s *Server) Run(ctx context.Context) error {
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() {
 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 			errc <- err
 		}
-		close(errc)
 	}()
+	if s.onionAddr != "" {
+		l, err := net.Listen("tcp", s.onionAddr)
+		if err != nil {
+			return fmt.Errorf("onion listener: %w", err)
+		}
+		s.log.Info("onion listener", "addr", s.onionAddr)
+		go func() {
+			if err := s.Serve(l); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+				errc <- err
+			}
+		}()
+	}
 	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()

@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"charm.land/lipgloss/v2"
+	"charm.land/ssh"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
@@ -35,14 +35,11 @@ import (
 //	H        key hints + connection status
 
 const (
-	maxEvents    = 1000
+	maxEvents    = 500
 	maxInputHist = 50
 	minWidth     = 20
 	minHeight    = 8
 )
-
-// WindowSize is a terminal resize notification.
-type WindowSize struct{ Width, Height int }
 
 type keyKind int
 
@@ -87,11 +84,12 @@ type Term struct {
 	width  int
 	height int
 
-	events  []chat.Event
-	evLines []int
-	lines   []string // rendered + wrapped for the current width
-	scroll  int      // lines scrolled up from the bottom
-	unseen  int      // lines that arrived while scrolled up
+	// Scrollback keeps only the events (their strings are shared with the
+	// hub and every other session); lines are rendered on demand. With
+	// thousands of sessions this keeps the live heap — and GC work — small.
+	events []*chat.Event
+	scroll int // lines scrolled up from the bottom
+	unseen int // lines that arrived while scrolled up
 
 	input   []rune
 	cursor  int
@@ -99,13 +97,14 @@ type Term struct {
 	histPos int
 	draft   string
 
-	last map[int]string // last content drawn on fixed rows, to skip no-op redraws
-	out  bytes.Buffer
+	last   map[int]string // last content drawn on fixed rows, to skip no-op redraws
+	curCol int            // cursor column on the input row (cached; recomputed on input change)
+	out    bytes.Buffer
 }
 
 // RunTerm drives a session. in/out are the SSH channel; resize delivers
 // window changes.
-func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int, resize <-chan WindowSize) string {
+func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int, resize <-chan ssh.Window) string {
 	t := &Term{w: rw, hub: hub, c: c, width: width, height: height, last: map[int]string{}}
 	t.fmt = Formatter{Styled: true, Self: func() string { return t.status.Nick }, Loc: func() *time.Location { return t.status.Loc }}
 	t.status = hub.Status(c)
@@ -133,26 +132,34 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 	for {
 		select {
 		case ev := <-c.Out:
-			t.addEvent(ev)
+			// Plain chat lines don't change the header/rooms/separator, so
+			// only refresh status (which takes the hub lock) for other events.
+			stale := t.addEvent(ev)
 			for drained := 0; drained < 512; drained++ {
 				select {
 				case ev := <-c.Out:
-					t.addEvent(ev)
+					stale = t.addEvent(ev) || stale
 					continue
 				default:
 				}
 				break
 			}
-			t.refreshStatus()
+			if stale {
+				t.refreshStatus()
+			}
 			t.flush()
 		case k := <-keys:
 			if quit := t.handleKey(k); quit {
 				return "Bye! 再见。"
 			}
 			t.flush()
-		case ws := <-resize:
+		case ws, ok := <-resize:
+			if !ok {
+				resize = nil
+				continue
+			}
 			t.width, t.height = ws.Width, ws.Height
-			t.rerender()
+			t.scroll, t.unseen = 0, 0
 			t.fullRedraw()
 			t.flush()
 		case <-tick.C:
@@ -174,7 +181,11 @@ func (t *Term) flush() {
 		return
 	}
 	_, _ = t.w.Write(t.out.Bytes())
-	t.out.Reset()
+	if t.out.Cap() > 16<<10 { // a full redraw grew it; don't keep it per session
+		t.out = bytes.Buffer{}
+	} else {
+		t.out.Reset()
+	}
 }
 
 // --- geometry ---------------------------------------------------------------
@@ -189,50 +200,58 @@ func (t *Term) moveTo(row, col int) { fmt.Fprintf(&t.out, "\x1b[%d;%dH", row, co
 
 // --- events & scrollback ------------------------------------------------------
 
-func (t *Term) render(ev chat.Event) []string {
+func (t *Term) render(ev *chat.Event) []string {
 	w := t.wrapW()
+	lines := t.fmt.Lines(*ev)
+	needWrap := false
+	for _, l := range lines {
+		if width(l) > w {
+			needWrap = true
+			break
+		}
+	}
+	if !needWrap {
+		return lines
+	}
 	var out []string
-	for _, l := range t.fmt.Lines(ev) {
-		if ansi.StringWidth(l) <= w {
+	for _, l := range lines {
+		if width(l) <= w {
 			out = append(out, l)
 			continue
 		}
 		// continuation lines are indented under the message text
 		const indent = "        "
-		for i, wl := range strings.Split(lipgloss.Wrap(l, w-len(indent), ""), "\n") {
+		for i, wl := range strings.Split(ansi.Wrap(l, w-len(indent), ""), "\n") {
 			if i > 0 {
 				wl = indent + wl
 			}
-			out = append(out, ansi.Truncate(wl, w, ""))
+			out = append(out, truncate(wl, w, ""))
 		}
 	}
 	return out
 }
 
-func (t *Term) addEvent(ev chat.Event) {
+// addEvent appends and draws an event; it reports whether the event may have
+// changed the status rows (joins, nick changes, room switches, ...).
+func (t *Term) addEvent(ev *chat.Event) (statusStale bool) {
+	switch ev.Kind {
+	case chat.KindChat, chat.KindAction, chat.KindDMIn, chat.KindDMOut:
+	default:
+		statusStale = true
+	}
 	t.events = append(t.events, ev)
-	r := t.render(ev)
-	t.lines = append(t.lines, r...)
-	t.evLines = append(t.evLines, len(r))
-	if len(t.events) > maxEvents+maxEvents/4 {
-		drop := len(t.events) - maxEvents
-		n := 0
-		for _, k := range t.evLines[:drop] {
-			n += k
-		}
-		t.events = append(t.events[:0:0], t.events[drop:]...)
-		t.evLines = append(t.evLines[:0:0], t.evLines[drop:]...)
-		t.lines = append(t.lines[:0:0], t.lines[n:]...)
-		t.scroll = min(t.scroll, max(0, len(t.lines)-t.bodyH()))
+	if len(t.events) > maxEvents+maxEvents/4 { // trim in batches
+		t.events = append(t.events[:0:0], t.events[len(t.events)-maxEvents:]...)
 	}
 	if t.tooSmall() {
-		return
+		return statusStale
 	}
+	r := t.render(ev)
 	if t.scroll > 0 { // reader is looking at history: don't move the view
 		t.scroll += len(r)
 		t.unseen += len(r)
 		t.drawSeparator()
-		return
+		return statusStale
 	}
 	// Scroll the chat region: put the cursor on its last row and emit a
 	// newline per line; the terminal shifts the region up by itself.
@@ -243,28 +262,44 @@ func (t *Term) addEvent(ev chat.Event) {
 		t.out.WriteString("\x1b[0m\x1b[K")
 	}
 	t.placeCursor()
+	return statusStale
 }
 
-func (t *Term) rerender() {
-	t.lines, t.evLines = t.lines[:0], t.evLines[:0]
-	for _, ev := range t.events {
-		r := t.render(ev)
-		t.lines = append(t.lines, r...)
-		t.evLines = append(t.evLines, len(r))
+// window renders the lines visible with the current scroll offset, walking
+// back from the newest event. If history runs out it clamps t.scroll.
+func (t *Term) window() []string {
+	h := t.bodyH()
+	need := t.scroll + h
+	var rev []string // newest line first
+	for i := len(t.events) - 1; i >= 0 && len(rev) < need; i-- {
+		r := t.render(t.events[i])
+		for j := len(r) - 1; j >= 0; j-- {
+			rev = append(rev, r[j])
+		}
 	}
-	t.scroll, t.unseen = 0, 0
+	if len(rev) < need { // reached the top of the scrollback
+		t.scroll = max(0, len(rev)-h)
+		if t.scroll == 0 {
+			t.unseen = 0
+		}
+	}
+	end := min(len(rev), t.scroll+h)
+	vis := make([]string, 0, h)
+	for i := end - 1; i >= t.scroll; i-- {
+		vis = append(vis, rev[i])
+	}
+	return vis
 }
 
 func (t *Term) clearChat() {
-	t.events, t.evLines, t.lines, t.scroll, t.unseen = nil, nil, nil, 0, 0
+	t.events, t.scroll, t.unseen = nil, 0, 0
 	t.drawChat()
 	t.drawSeparator()
 	t.placeCursor()
 }
 
 func (t *Term) scrollBy(n int) {
-	maxScroll := max(0, len(t.lines)-t.bodyH())
-	s := max(0, min(t.scroll+n, maxScroll))
+	s := max(0, t.scroll+n)
 	if s == t.scroll {
 		return
 	}
@@ -272,7 +307,7 @@ func (t *Term) scrollBy(n int) {
 	if s == 0 {
 		t.unseen = 0
 	}
-	t.drawChat()
+	t.drawChat() // clamps t.scroll at the top of history
 	t.drawSeparator()
 	t.placeCursor()
 }
@@ -301,9 +336,7 @@ func (t *Term) drawChat() {
 		return
 	}
 	h := t.bodyH()
-	end := len(t.lines) - t.scroll
-	start := max(0, end-h)
-	vis := t.lines[start:end]
+	vis := t.window()
 	pad := h - len(vis)
 	for i := 0; i < h; i++ {
 		t.moveTo(t.chatTop()+i, 1)
@@ -334,17 +367,6 @@ func (t *Term) refreshStatus() {
 	t.drawSeparator()
 }
 
-var (
-	headerStyle = lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15")).Bold(true)
-	headerDim   = lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("7"))
-	curRoom     = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
-	dim         = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	promptStyle = lipgloss.NewStyle().Foreground(cAccent).Bold(true)
-	okDot       = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	warnStyle   = lipgloss.NewStyle().Foreground(cNotice)
-	errStyle    = lipgloss.NewStyle().Foreground(cError)
-)
-
 func (t *Term) headerLine() string {
 	s := t.status
 	loc := s.Loc
@@ -353,26 +375,26 @@ func (t *Term) headerLine() string {
 	}
 	left := " PRIVATE-TALK TERMINAL "
 	right := fmt.Sprintf(" %s · Online %d · Up %s · %s ", s.Nick, s.Online, Uptime(s.Uptime), time.Now().In(loc).Format("15:04 MST"))
-	if ansi.StringWidth(left)+ansi.StringWidth(right) > t.width {
+	if width(left)+width(right) > t.width {
 		right = fmt.Sprintf(" %s · %d online ", s.Nick, s.Online)
 	}
-	gap := max(0, t.width-ansi.StringWidth(left)-ansi.StringWidth(right))
-	return ansi.Truncate(headerStyle.Render(left)+headerDim.Render(strings.Repeat(" ", gap)+right), t.width, "")
+	gap := max(0, t.width-width(left)-width(right))
+	return truncate(sHeader.R(left)+sHeaderDim.R(strings.Repeat(" ", gap)+right), t.width, "")
 }
 
 func (t *Term) roomsLine() string {
 	var b strings.Builder
-	b.WriteString(dim.Render("ROOMS "))
+	b.WriteString(sDim.R("ROOMS "))
 	for _, r := range t.status.Rooms {
 		item := fmt.Sprintf("%s %d", r.Label, r.Users)
 		if r.Current {
-			b.WriteString(curRoom.Render("▸" + item))
+			b.WriteString(sCurRoom.R("▸" + item))
 		} else {
 			b.WriteString(" " + item)
 		}
 		b.WriteString("  ")
 	}
-	return ansi.Truncate(b.String(), t.width, "…")
+	return truncate(b.String(), t.width, "…")
 }
 
 func (t *Term) drawSeparator() {
@@ -382,69 +404,70 @@ func (t *Term) drawSeparator() {
 		txt += " · " + s.Topic
 	}
 	txt += " "
-	line := dim.Render(txt)
+	line := sDim.R(txt)
 	if s.Muted {
-		line += errStyle.Render("[MUTED] ")
+		line += sError.R("[MUTED] ")
 	}
 	if s.Admin {
-		line += warnStyle.Render("[ADMIN] ")
+		line += sNotice.R("[ADMIN] ")
 	}
 	if t.scroll > 0 {
 		more := fmt.Sprintf("↑ scrolled %d", t.scroll)
 		if t.unseen > 0 {
 			more = fmt.Sprintf("↓ %d new", t.unseen)
 		}
-		line += warnStyle.Render(more + " · End 回到底部 ")
+		line += sNotice.R(more + " · End 回到底部 ")
 	}
-	if pad := t.width - ansi.StringWidth(line); pad > 0 {
-		line += dim.Render(strings.Repeat("─", pad))
+	if pad := t.width - width(line); pad > 0 {
+		line += sDim.R(strings.Repeat("─", pad))
 	}
-	t.drawFixed(t.height-2, ansi.Truncate(line, t.width, ""))
+	t.drawFixed(t.height-2, truncate(line, t.width, ""))
 }
 
 func (t *Term) footerLine() string {
 	keys := "Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 · Ctrl+C 退出"
-	st := okDot.Render("● CONNECTED")
-	gap := t.width - ansi.StringWidth(keys) - ansi.StringWidth(st) - 1
+	st := sOK.R("● CONNECTED")
+	gap := t.width - width(keys) - width(st) - 1
 	if gap < 1 {
 		keys = "Enter 发送 · PgUp/PgDn · Ctrl+C 退出"
-		gap = max(1, t.width-ansi.StringWidth(keys)-ansi.StringWidth(st)-1)
+		gap = max(1, t.width-width(keys)-width(st)-1)
 	}
-	return ansi.Truncate(dim.Render(keys)+strings.Repeat(" ", gap)+st, t.width, "")
+	return truncate(sDim.R(keys)+strings.Repeat(" ", gap)+st, t.width, "")
 }
 
 // inputView returns the visible part of the input and the cursor column.
 func (t *Term) inputView() (string, int) {
 	prompt := "> "
-	avail := max(4, t.width-ansi.StringWidth(prompt)-1)
+	avail := max(4, t.width-width(prompt)-1)
 	if len(t.input) == 0 {
-		ph := ansi.Truncate("说点什么… type a message or /help", avail, "")
-		return promptStyle.Render(prompt) + dim.Render(ph), ansi.StringWidth(prompt) + 1
+		ph := truncate("说点什么… type a message or /help", avail, "")
+		return sPrompt.R(prompt) + sDim.R(ph), width(prompt) + 1
 	}
 	// choose a start so the cursor stays visible
 	start := 0
-	for ansi.StringWidth(string(t.input[start:t.cursor])) > avail-1 {
+	for width(string(t.input[start:t.cursor])) > avail-1 {
 		start++
 	}
 	var b strings.Builder
 	w := 0
 	for _, r := range t.input[start:] {
-		rw := max(1, ansi.StringWidth(string(r)))
+		rw := max(1, width(string(r)))
 		if w+rw > avail {
 			break
 		}
 		b.WriteRune(r)
 		w += rw
 	}
-	col := ansi.StringWidth(prompt) + ansi.StringWidth(string(t.input[start:t.cursor])) + 1
-	return promptStyle.Render(prompt) + b.String(), col
+	col := width(prompt) + width(string(t.input[start:t.cursor])) + 1
+	return sPrompt.R(prompt) + b.String(), col
 }
 
 func (t *Term) drawInput() {
 	if t.tooSmall() {
 		return
 	}
-	s, _ := t.inputView()
+	s, col := t.inputView()
+	t.curCol = col
 	t.moveTo(t.height-1, 1)
 	t.out.WriteString(s)
 	t.out.WriteString("\x1b[0m\x1b[K")
@@ -455,8 +478,10 @@ func (t *Term) placeCursor() {
 	if t.tooSmall() {
 		return
 	}
-	_, col := t.inputView()
-	t.moveTo(t.height-1, min(col, t.width))
+	if t.curCol == 0 {
+		_, t.curCol = t.inputView()
+	}
+	t.moveTo(t.height-1, min(t.curCol, t.width))
 }
 
 // --- input --------------------------------------------------------------------
@@ -490,7 +515,7 @@ func (t *Term) handleKey(k key) (quit bool) {
 		t.cursor = min(len(t.input), t.cursor+1)
 	case kHome:
 		if len(t.input) == 0 {
-			t.scrollBy(len(t.lines))
+			t.scrollBy(maxEvents * 8) // clamped to the top
 			return false
 		}
 		t.cursor = 0
@@ -637,7 +662,7 @@ func (t *Term) complete() {
 	if len(cands) > 1 {
 		pick = commonPrefix(cands)
 		if utf8.RuneCountInString(pick) <= utf8.RuneCountInString(word) {
-			t.addEvent(chat.Event{Time: time.Now(), Kind: chat.KindInfo, Text: strings.Join(cands, "  ")})
+			t.addEvent(&chat.Event{Time: time.Now(), Kind: chat.KindInfo, Text: strings.Join(cands, "  ")})
 			return
 		}
 	} else if i == 0 && !strings.HasPrefix(pick, "/") {
@@ -668,7 +693,7 @@ func commonPrefix(s []string) string {
 // readKeys decodes the byte stream from an xterm-compatible terminal
 // (including Windows Terminal / conhost via OpenSSH) into keys.
 func readKeys(r io.Reader, out chan<- key, stop <-chan struct{}) {
-	br := bufio.NewReaderSize(r, 4096)
+	br := bufio.NewReaderSize(r, 512)
 	send := func(k key) bool {
 		select {
 		case out <- k:

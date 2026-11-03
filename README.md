@@ -74,6 +74,7 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 | `--rooms LIST` | 公共频道，如 `"general:大厅,chinese:中文,tech:技术"`（第一个是大厅） |
 | `--domain NAME` | 只用于最后显示的连接命令 |
 | `--version vX.Y.Z` | 安装指定版本 |
+| `--tor` | 同时发布为 Tor 洋葱服务（自动安装 Tor），用户可以不暴露 IP 连接，见下文 |
 | `--from-source` | 从源码编译（会临时下载 Go，结束后删除） |
 | `--no-firewall` | 不改防火墙 |
 
@@ -93,10 +94,11 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 | 完整界面（推荐） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@HOST` |
 | 纯文本模式（老终端 / CMD 乱码时） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
 | 无终端 / 脚本 / 机器人 | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
-| 最大匿名（不向服务器出示公钥） | `ssh -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no -p 2222 guest@HOST` |
+| 通过 Tor（服务器看不到你的 IP） | `torsocks ssh guest@<onion地址>.onion`（见下文“通过 Tor 连接”） |
 
-- 用户名随便填，没有密码；客户端问密码就直接回车。
+- 用户名随便填（`admin` 留给管理员），没有密码，连上直接进聊天室。
 - 使用上面的 `accept-new` 选项后，首次连接会自动记录服务器主机密钥；之后若密钥变化，SSH 会拒绝连接并提示风险。
+- 客户端不会向服务器发送你的公钥，不需要额外加 `PubkeyAuthentication=no`（原理见“安全与匿名性”）。
 - Windows 10/11 自带 OpenSSH；中文显示推荐 Windows Terminal。老 CMD 乱码时用 `plain@`，或先执行 `chcp 65001`。
 
 如果希望命令中不写 `-o StrictHostKeyChecking=accept-new`，在 SSH 配置文件中为该域名设置一次：Windows 文件为 `%USERPROFILE%\.ssh\config`，macOS/Linux 文件为 `~/.ssh/config`。把下面内容加到文件靠前位置：
@@ -107,6 +109,50 @@ Host term.freedom8964.com
 ```
 
 之后可直接运行 `ssh -p 2222 guest@term.freedom8964.com`。首次自动保存密钥，后续仍会拒绝密钥变化。
+
+### iPhone / iPad（iOS）
+
+iOS 没有内置的终端工具，需要从 App Store 下载一款第三方 SSH 客户端，再把连接命令里的参数填进去。下面是两种最简单的免费方法。
+
+#### 方法一：iSH Shell（最直接，可以直接粘贴命令）
+
+iSH Shell 是一个在 iOS 上模拟 Linux 环境的免费应用，可以像在电脑上一样直接运行连接命令。
+
+1. 打开 App Store，搜索并下载 **iSH Shell**。
+2. 首次打开时先安装 SSH 客户端。在黑色命令行界面输入下面的命令并按回车：
+
+   ```
+   apk add openssh-client
+   ```
+
+   等进度走完、底部再次出现 `~ #` 提示符，就表示安装成功。
+3. 复制并粘贴连接命令，然后按回车：
+
+   ```
+   ssh -p 2222 guest@term.freedom8964.com
+   ```
+
+4. 首次连接时屏幕会提示 `Are you sure you want to continue connecting (yes/no/[fingerprint])?`，输入 `yes` 并按回车。
+5. 不需要密码，确认后就会直接进入聊天室界面。
+
+#### 方法二：Termius 或 WebSSH（图形界面，适合经常连接）
+
+如果想保存这个地址、下次一键打开，可以用专门的 SSH 客户端（例如 **Termius** 或 **WebSSH**）。这类应用需要把命令拆开填写：
+
+| 参数 | 填写内容 |
+| --- | --- |
+| 主机地址（Host / Address） | `term.freedom8964.com` |
+| 端口（Port） | `2222`（默认是 22，务必改成 2222） |
+| 用户名（Username） | `guest` |
+| 密码（Password） | 留空 |
+
+以 Termius 为例：
+
+1. **下载并打开客户端，不用注册。** 在 App Store 下载 Termius（或 WebSSH）。打开后如果提示登录或注册，选择跳过（Skip / Continue without account），本地功能即可免费使用。
+2. **新建主机。** 点界面上的 **+** 号（New Host），按上表填写：Address / Hostname 填 `term.freedom8964.com`；往下滑动找到 SSH 配置栏，把 Port 从 22 改成 `2222`；Username 填 `guest`；Password 留空。点右上角的保存（Save），列表里会出现刚创建的服务器图标。
+3. **连接并确认指纹。** 点保存好的主机图标发起连接。首次连接会弹出主机密钥确认窗口（Host Key Verification），点 Continue 或 Accept。屏幕切换成黑色终端界面并显示出聊天室文字后，呼出键盘就可以开始打字了。
+
+> 小提示：手机屏幕窄、显示效果不理想时，可以把用户名改成 `plain`，进入纯文本模式。
 
 ### 命令
 
@@ -130,7 +176,7 @@ Host term.freedom8964.com
 
 ### 管理员
 
-用安装时登记的私钥连接，分隔线上会显示 `[ADMIN]`：
+用户名填 `admin`，并用安装时登记的私钥连接（`ssh -p 2222 -i ~/.ssh/id_ed25519 admin@HOST`），分隔线上会显示 `[ADMIN]`。只有 `admin` 这个用户名才会检查密钥：管理员的密钥配错了会直接被拒绝，不会悄悄降级成普通用户。
 
 ```
 /kick <nick> [reason]   /mute <nick> [分钟]   /unmute <nick>
@@ -145,12 +191,31 @@ Host term.freedom8964.com
 
 - **SSH 只加密传输，不是端到端加密。** 服务器进程能读到消息内容，每次进入都会提醒。
 - **不提供 Shell。** 没有 exec、SFTP/SCP、端口转发、代理转发、X11。CI 会在真实服务器上验证这一点。
-- **不记录 IP。** 日志里没有 IP、昵称或消息。限流和封禁使用“IP 的 HMAC”，密钥只在内存里，每次重启都换；IPv6 按 /64 归并。健康检查接口只返回计数。
-- **不收集公钥。** 只接受管理员名单里的公钥。注意 SSH 协议会让客户端先“出示”公钥，想彻底避免就加 `-o PubkeyAuthentication=no`。
+- **不记录 IP。** 日志里没有 IP、昵称或消息，第三方库写的日志也会统一过滤掉地址字段。限流和封禁使用“IP 的 HMAC”，密钥只在内存里，每次重启都换；IPv6 按 /64 归并。健康检查接口只返回计数。
+- **客户端根本不会发送公钥。** 正常情况下，SSH 客户端会把你电脑上的公钥逐个“出示”给服务器。GitHub 上每个人的公钥都是公开的，服务器拿来一比对就能认出你是谁。本服务在 SSH 认证的第一步（`none`）就放行普通用户，客户端还没走到出示公钥那一步。只有 `admin` 用户名才会进入密钥认证。可以用 `ssh -v` 验证：输出里是 `Authenticated ... using "none"`，没有 `Offering public key`。CI 里也有对应的测试。
 - **消息不落盘。** 每个房间只在内存保留最近 50 条、最长 1 小时；私人房间清空即销毁；私聊不保存。
 - **终端注入防护。** 昵称和消息里的控制字符、ANSI/OSC 转义序列、Unicode 双向覆盖字符一律剔除。
 - **防滥用。** 每个地址最多 3 个会话、8 个 TCP 连接、每分钟 10 次新连接；消息令牌桶（突发 5 条、每秒 1 条）；重复消息拦截；频繁超限自动禁言；1 小时不发言自动断开。
-- VPS 和云服务商仍然能看到连接来源 IP，这是应用层无法消除的。
+- **Tor 洋葱服务（可选）。** 普通连接下，VPS 和云服务商仍然能看到来源 IP，这在应用层无法消除。安装时加 `--tor`，聊天室会同时发布为 `.onion` 地址：通过 Tor 进来的用户，服务器只能看到“来自 Tor”，看不到真实 IP。代价是这些用户无法按地址封禁（`/ban` 会改为踢出），他们共用一组更宽松的限流额度。
+
+### 通过 Tor 连接
+
+服务器端：`sudo ptterm-ctl install --tor`，结束时会打印 `.onion` 地址（也可以用 `sudo ptterm-ctl status` 查看）。洋葱私钥保存在 `/var/lib/tor/ptterm/`，升级和普通卸载都会保留，只有 `--purge` 会删除。
+
+用户端（需要本地运行 Tor，或者开着 Tor Browser）：
+
+```bash
+# Linux / macOS（装好 tor 和 torsocks）
+torsocks ssh guest@xxxxxxxx.onion
+
+# 不想装 torsocks：通过 Tor 的 SOCKS 端口（Tor Browser 用 9150，tor 服务用 9050）
+ssh -o ProxyCommand='nc -x 127.0.0.1:9050 %h %p' guest@xxxxxxxx.onion
+
+# Windows（Git for Windows 自带 connect.exe），先打开 Tor Browser
+ssh -o ProxyCommand="connect -S 127.0.0.1:9150 %h %p" guest@xxxxxxxx.onion
+```
+
+洋葱地址本身就包含了服务器的身份验证，不需要再额外核对 SSH 主机指纹。
 
 ---
 
@@ -160,13 +225,20 @@ Host term.freedom8964.com
 
 | 在线会话 | 模式 | 投递率 | 延迟 p50 / p99 | 内存 |
 | --- | --- | --- | --- | --- |
-| 500 | 完整界面 | 100% | 46 ms / 251 ms | 241 MB |
-| 1000 | 完整界面 | 100% | 367 ms / 1.6 s（单核已满载） | 495 MB |
-| 2000 | 纯文本 | 100% | 26 ms / 228 ms | 343 MB |
+| 1000 | 完整界面 | 100% | 14 ms / 37 ms | 157 MB |
+| 2000 | 完整界面 | 100% | 30 ms / 148 ms | 355 MB |
+| 3000 | 完整界面 | 100% | 91 ms / 478 ms | 532 MB |
+| 4000 | 纯文本 | 100% | 423 ms / 1.4 s（单核已满载） | 360 MB |
 
-结论：**1 核 1GB 的 VPS 能比较从容地承载约 500 名同时在线的完整界面用户**；人更多时加 CPU 核数即可（Go 会自动用满）。实际负载取决于消息频率：同样人数分散在多个房间，开销要小得多。
+结论：**1 核 1GB 的 VPS 可以承载约 2000 名同时在线的完整界面用户**，3000 人仍能正常投递但延迟开始上升。人更多时加 CPU 核数即可（Go 会自动用满）。同样人数分散在多个房间时开销小得多。
 
-完整界面使用专门写的轻量终端渲染器，利用终端的滚动区域：每条新消息只发送那一行，固定行在内容变化时才重画。早期版本用的通用 TUI 框架每帧都要重新排版整屏，同等负载下内存和 CPU 高出数倍。
+几项关键设计：
+
+- **自己写的轻量终端渲染器。** 利用终端的滚动区域，每条新消息只发送新的那几行，固定行只在内容变化时重画。早期版本用的通用 TUI 框架每帧都要重新排版整屏，300 人在线就要 883 MB 内存，延迟到秒级。
+- **渲染结果跨会话共享。** 同一条消息对大多数人显示得一样，只格式化一次。只有你自己发的、或 @ 到你的消息才单独渲染。
+- **滚动历史按需渲染。** 每个会话只保存指向共享消息的指针，翻页时才渲染。
+- **热路径上没有通用样式引擎。** 颜色是预先算好的转义码，ASCII 文本的宽度直接计算。
+- **普通聊天消息不触发状态栏刷新**，不必去争抢全局锁。
 
 自己测：`make bench`，或参考 `cmd/ptt-bench/main.go` 顶部注释。
 
@@ -183,6 +255,8 @@ Host term.freedom8964.com
 | `PTT_ROOMS` / `-rooms` | 5 个默认频道 | `name:主题,name2:主题2` |
 | `PTT_MOTD` / `-motd` | — | 进入时额外显示的公告文本文件 |
 | `PTT_HEALTH_ADDR` / `-health-addr` | `127.0.0.1:2223` | `GET /healthz`，只返回计数 |
+| `PTT_ADMIN_USER` / `-admin-user` | `admin` | 管理员登录用的用户名 |
+| `PTT_ONION_ADDR` / `-onion-addr` | — | 给 Tor 洋葱服务用的本地监听地址（`--tor` 自动设为 `127.0.0.1:2224`） |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | 连接限制 |
 | `-msg-rate` / `-msg-burst` / `-max-len` | 1/s / 5 / 500 | 发言限制 |
@@ -224,5 +298,7 @@ deploy/                     systemd 单元（由 install.sh --print-unit 生成�
 - [x] SSH 无账号登录、随机昵称、公共频道、私人房间码、私聊、中文
 - [x] 限流、管理员工具、举报、屏蔽、消息过期、权限隔离、systemd 沙箱
 - [x] 一键安装 / 升级 / 卸载，CI，自动发布，压测
+- [x] 普通用户不发送公钥，日志过滤地址，Tor 洋葱服务
+- [x] 单核约 2000 名完整界面用户
 - [ ] 封禁持久化（可选）、多房间未读提示
 - [ ] 与 Private-Talk 打通。普通 SSH 客户端无法端到端加密；要让服务器读不到内容，必须在用户本地有专用加密客户端。

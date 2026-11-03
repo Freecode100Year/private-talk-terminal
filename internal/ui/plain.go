@@ -40,7 +40,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 	for {
 		select {
 		case ev := <-c.Out:
-			p.printEvent(ev)
+			p.printEvent(*ev)
 		case <-c.Done:
 			if r := c.Reason(); r != "" {
 				p.printRaw("Disconnected: " + r)

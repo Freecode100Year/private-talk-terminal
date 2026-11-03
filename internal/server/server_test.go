@@ -3,9 +3,12 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +21,11 @@ import (
 
 func startServer(t *testing.T) string {
 	t.Helper()
+	return startServerWith(t, nil)
+}
+
+func startServerWith(t *testing.T, mod func(*Options)) string {
+	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +34,11 @@ func startServer(t *testing.T) string {
 	l.Close()
 
 	hub := chat.NewHub(chat.Config{MsgBurst: 50, MsgPerSecond: 50})
-	srv, err := New(hub, Options{Addr: addr, HostKeyPath: filepath.Join(t.TempDir(), "hk")}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	opt := Options{Addr: addr, HostKeyPath: filepath.Join(t.TempDir(), "hk")}
+	if mod != nil {
+		mod(&opt)
+	}
+	srv, err := New(hub, opt, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,4 +143,70 @@ func TestForwardingRejected(t *testing.T) {
 		l.Close()
 		t.Fatal("remote forwarding allowed")
 	}
+}
+
+// Ordinary users must be admitted before their client offers any public key:
+// keys are linkable identities.
+func TestClientNeverOffersKey(t *testing.T) {
+	addr := startServer(t)
+	signer := testSigner(t)
+	offered := false
+	cfg := &gossh.ClientConfig{
+		User: "guest",
+		Auth: []gossh.AuthMethod{gossh.PublicKeysCallback(func() ([]gossh.Signer, error) {
+			offered = true
+			return []gossh.Signer{signer}, nil
+		})},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	}
+	c, err := gossh.Dial("tcp", addr, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if offered {
+		t.Fatal("server let the client get as far as offering a public key")
+	}
+}
+
+func TestAdminRequiresKey(t *testing.T) {
+	adminSigner := testSigner(t)
+	addr := startServerWith(t, func(o *Options) {
+		path := filepath.Join(t.TempDir(), "admins")
+		os.WriteFile(path, gossh.MarshalAuthorizedKey(adminSigner.PublicKey()), 0o600)
+		o.AdminKeysPath = path
+	})
+	try := func(user string, auth ...gossh.AuthMethod) error {
+		c, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{User: user, Auth: auth, HostKeyCallback: gossh.InsecureIgnoreHostKey(), Timeout: 5 * time.Second})
+		if err == nil {
+			c.Close()
+		}
+		return err
+	}
+	if err := try("admin", gossh.PublicKeys(adminSigner)); err != nil {
+		t.Fatalf("admin with key rejected: %v", err)
+	}
+	if err := try("admin"); err == nil {
+		t.Fatal("admin username accepted without a key")
+	}
+	if err := try("admin", gossh.PublicKeys(testSigner(t))); err == nil {
+		t.Fatal("admin username accepted with an unlisted key")
+	}
+	if err := try("admin", gossh.KeyboardInteractive(func(string, string, []string, []bool) ([]string, error) { return nil, nil })); err == nil {
+		t.Fatal("admin username accepted via keyboard-interactive")
+	}
+}
+
+func testSigner(t *testing.T) gossh.Signer {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := gossh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

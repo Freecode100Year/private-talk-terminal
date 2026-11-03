@@ -3,7 +3,6 @@ module github.com/Freecode100Year/private-talk-terminal
 go 1.26.8
 
 require (
-	charm.land/lipgloss/v2 v2.0.6
 	charm.land/ssh v0.4.3
 	charm.land/wish/v2 v2.0.5
 	github.com/charmbracelet/x/ansi v0.11.9
@@ -12,6 +11,7 @@ require (
 
 require (
 	charm.land/bubbletea/v2 v2.1.1 // indirect
+	charm.land/lipgloss/v2 v2.0.6 // indirect
 	charm.land/log/v2 v2.0.1 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect

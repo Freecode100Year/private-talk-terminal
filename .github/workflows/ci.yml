@@ -95,6 +95,29 @@ jobs:
           echo "$out"
           echo "$out" | grep -q "only offers the chat room"
 
+      - name: Client never sends a public key
+        run: |
+          exec > >(tee -a /tmp/ci-logs/no-key-offered.log) 2>&1
+          set -x
+          ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519   # a default key the client would normally offer
+          log=$( (sleep 1; echo /quit) | ssh -v -T -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 2>&1 )
+          echo "$log" | grep -E "Offering|Authenticated"
+          echo "$log" | grep -q 'using "none"'
+          if echo "$log" | grep -q "Offering public key"; then echo "client offered a key"; exit 1; fi
+
+      - name: Tor onion service
+        run: |
+          exec > >(tee -a /tmp/ci-logs/tor.log) 2>&1
+          set -x
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --tor
+          onion=$(sudo cat /var/lib/tor/ptterm/hostname)
+          echo "$onion" | grep -Eq '^[a-z2-7]{56}\.onion$'
+          sudo ptterm-ctl status | grep -q "Onion:"
+          # the local side of the onion service accepts chat sessions
+          out=$( (sleep 1; echo /quit) | ssh -T -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
+          echo "$out" | grep -q "Welcome"
+          sudo ss -ltn | grep -q '127.0.0.1:2224 '
+
       - name: Status, reinstall, uninstall
         run: |
           exec > >(tee -a /tmp/ci-logs/status-reinstall-uninstall.log) 2>&1
@@ -103,6 +126,8 @@ jobs:
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --port 2299
           ss -ltn | grep -q ':2299 '
           sudo ptterm-ctl uninstall --purge
+          if grep -q "private-talk-terminal" /etc/tor/torrc; then echo "torrc not cleaned"; exit 1; fi
+          test ! -e /var/lib/tor/ptterm
           if systemctl is-active --quiet ptterm; then echo "still running"; exit 1; fi
           test ! -e /usr/local/bin/ptterm
 

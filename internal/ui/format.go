@@ -1,36 +1,21 @@
-// Package ui renders chat events for SSH sessions: a full Bubble Tea TUI and
-// a plain line-mode fallback for old or minimal terminals.
+// Package ui renders chat events for SSH sessions: a lightweight full-screen
+// terminal UI and a plain line-mode fallback for old or minimal terminals.
 package ui
 
 import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"sync"
 	"time"
-
-	"charm.land/lipgloss/v2"
 
 	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
 )
 
-// Palette used by the TUI. Plain ANSI 16-colour indexes so it works on
-// Windows conhost, old xterms and everything in between.
-var (
-	cTime    = lipgloss.Color("8")
-	cSystem  = lipgloss.Color("8")
-	cInfo    = lipgloss.Color("6")
-	cError   = lipgloss.Color("9")
-	cNotice  = lipgloss.Color("11")
-	cDM      = lipgloss.Color("13")
-	cSelf    = lipgloss.Color("15")
-	cAccent  = lipgloss.Color("10")
-	nickPals = []string{"2", "3", "4", "5", "6", "12", "14", "10", "11", "13"}
-)
-
-func nickColor(n string) lipgloss.Style {
+func nickColor(n string) sgr {
 	h := fnv.New32a()
 	h.Write([]byte(strings.ToLower(n)))
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(nickPals[h.Sum32()%uint32(len(nickPals))]))
+	return nickPalette[h.Sum32()%uint32(len(nickPalette))]
 }
 
 // Formatter turns events into display lines.
@@ -40,20 +25,76 @@ type Formatter struct {
 	Loc    func() *time.Location // viewer's timezone (nil = server local)
 }
 
-func (f Formatter) st(c interface{ RGBA() (r, g, b, a uint32) }, s string) string {
+func (f Formatter) st(c sgr, s string) string {
 	if !f.Styled {
 		return s
 	}
-	return lipgloss.NewStyle().Foreground(c).Render(s)
+	return c.R(s)
 }
 
-// Lines renders one event to one or more unwrapped lines.
+// Rendered lines of room events are shared between sessions: everyone who
+// sees a message the same way (same timezone, not their own message, not
+// mentioning them) gets the same strings. A message to a busy room is then
+// formatted a handful of times instead of once per connected user.
+type renderKey struct {
+	id   uint64
+	loc  *time.Location
+	hist bool
+}
+
+var (
+	renderCache sync.Map // renderKey -> []string
+	renderRing  = struct {
+		sync.Mutex
+		keys []renderKey
+		pos  int
+	}{keys: make([]renderKey, 8192)}
+)
+
+func cachePut(k renderKey, lines []string) {
+	if _, loaded := renderCache.LoadOrStore(k, lines); loaded {
+		return
+	}
+	renderRing.Lock()
+	if old := renderRing.keys[renderRing.pos]; old.id != 0 {
+		renderCache.Delete(old)
+	}
+	renderRing.keys[renderRing.pos] = k
+	renderRing.pos = (renderRing.pos + 1) % len(renderRing.keys)
+	renderRing.Unlock()
+}
+
+// Lines renders one event to one or more unwrapped lines. The returned slice
+// may be shared: callers must not modify it.
 func (f Formatter) Lines(ev chat.Event) []string {
+	if !f.Styled || ev.ID == 0 {
+		return f.lines(ev)
+	}
+	self := ""
+	if f.Self != nil {
+		self = f.Self()
+	}
+	if self != "" && (ev.From == self || Mentions(ev.Text, self)) {
+		return f.lines(ev) // personalised rendering
+	}
+	var loc *time.Location
+	if f.Loc != nil {
+		loc = f.Loc()
+	}
+	k := renderKey{id: ev.ID, loc: loc, hist: ev.History}
+	if v, ok := renderCache.Load(k); ok {
+		return v.([]string)
+	}
+	lines := f.lines(ev)
+	cachePut(k, lines)
+	return lines
+}
+
+func (f Formatter) lines(ev chat.Event) []string {
 	if ev.History && f.Styled { // replayed history: whole line dimmed
-		lines := Formatter{Self: f.Self, Loc: f.Loc}.Lines(ev)
-		faint := lipgloss.NewStyle().Foreground(cTime)
+		lines := Formatter{Self: f.Self, Loc: f.Loc}.lines(ev)
 		for i := range lines {
-			lines[i] = faint.Render(lines[i])
+			lines[i] = sDim.R(lines[i])
 		}
 		return lines
 	}
@@ -66,10 +107,7 @@ func (f Formatter) Lines(ev chat.Event) []string {
 			t = t.In(loc)
 		}
 	}
-	ts := "[" + t.Format("15:04") + "] "
-	if f.Styled {
-		ts = f.st(cTime, ts)
-	}
+	ts := f.st(sDim, "["+t.Format("15:04")+"] ")
 	self := ""
 	if f.Self != nil {
 		self = f.Self()
@@ -79,15 +117,15 @@ func (f Formatter) Lines(ev chat.Event) []string {
 			return n
 		}
 		if n == self {
-			return lipgloss.NewStyle().Foreground(cSelf).Bold(true).Render(n)
+			return sSelf.R(n)
 		}
-		return nickColor(n).Render(n)
+		return nickColor(n).R(n)
 	}
 
 	text := ev.Text
-	if (ev.Kind == chat.KindChat || ev.Kind == chat.KindAction) && Mentions(text, self) && ev.From != self {
+	if (ev.Kind == chat.KindChat || ev.Kind == chat.KindAction) && ev.From != self && Mentions(text, self) {
 		if f.Styled {
-			text = lipgloss.NewStyle().Foreground(cNotice).Bold(true).Render(text)
+			text = sMention.R(text)
 		} else {
 			text = "» " + text
 		}
@@ -99,28 +137,28 @@ func (f Formatter) Lines(ev chat.Event) []string {
 	case chat.KindAction:
 		head = ts + "* " + nick(ev.From) + " " + text
 	case chat.KindSystem:
-		head = ts + f.st(cSystem, "-- "+ev.Text)
+		head = ts + f.st(sDim, "-- "+ev.Text)
 	case chat.KindDMIn:
-		head = ts + f.st(cDM, "[私信 from "+ev.From+"] ") + ev.Text
+		head = ts + f.st(sDM, "[私信 from "+ev.From+"] ") + ev.Text
 	case chat.KindDMOut:
-		head = ts + f.st(cDM, "[私信 to "+ev.To+"] ") + ev.Text
+		head = ts + f.st(sDM, "[私信 to "+ev.To+"] ") + ev.Text
 	case chat.KindInfo:
-		head = ts + f.st(cInfo, "* "+ev.Text)
+		head = ts + f.st(sInfo, "* "+ev.Text)
 	case chat.KindError:
-		head = ts + f.st(cError, "! "+ev.Text)
+		head = ts + f.st(sError, "! "+ev.Text)
 	case chat.KindNotice:
 		from := "System"
 		if ev.From != "" {
 			from = "Admin " + ev.From
 		}
-		head = ts + f.st(cNotice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
+		head = ts + f.st(sNotice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
 	default:
 		head = ts + ev.Text
 	}
 	out := []string{head}
 	for _, l := range ev.Lines {
 		if ev.Kind == chat.KindInfo || ev.Kind == chat.KindError {
-			out = append(out, "        "+f.st(cInfo, l))
+			out = append(out, "        "+f.st(sInfo, l))
 		} else {
 			out = append(out, "        "+l)
 		}

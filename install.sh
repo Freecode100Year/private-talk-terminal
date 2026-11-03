@@ -22,12 +22,16 @@ CONF_DIR=/etc/ptterm
 ADMIN_FILE=$CONF_DIR/admins.pub
 STATE_DIR=/var/lib/ptterm
 GO_VERSION="${GO_VERSION:-1.26.9}"
+TORRC=/etc/tor/torrc
+ONION_DIR=/var/lib/tor/ptterm
+ONION_LOCAL=127.0.0.1:2224
 
 CMD=install
 PORT=""
 VERSION="${PTT_VERSION:-latest}"
 FROM_SOURCE=0
 FIREWALL=1
+TOR=0
 PURGE=0
 ROOMS=""
 DOMAIN=""
@@ -72,6 +76,8 @@ Options
   --rooms LIST       public rooms, e.g. "general:Lobby,chinese:中文,tech:技术"
   --domain NAME      domain to show in the final connect command
   --version vX.Y.Z   install a specific release (default: latest)
+  --tor              also publish the chat as a Tor onion service, so users can
+                     connect without the server ever seeing their IP address
   --from-source      build from source instead of downloading a release
   --no-firewall      don't touch ufw/firewalld/iptables
   --purge            with uninstall: also delete config, host key and admins
@@ -106,6 +112,7 @@ parse_args() {
 		--version) VERSION=${2:?--version needs a value}; shift 2 ;;
 		--version=*) VERSION=${1#*=}; shift ;;
 		--from-source) FROM_SOURCE=1; shift ;;
+		--tor) TOR=1; shift ;;
 		--no-firewall) FIREWALL=0; shift ;;
 		--purge) PURGE=1; shift ;;
 		--print-unit) CMD=print-unit; shift ;;
@@ -198,9 +205,9 @@ build_from_source() {
 	local goarch=$ARCH goarm="" ref url
 	[ "$ARCH" = armv7 ] && goarch=arm goarm=7
 	local go="$TMP/go/bin/go"
-	if command -v go >/dev/null && go version | grep -Eq 'go1\.(2[6-9]|[3-9][0-9])'; then
+	if command -v go >/dev/null && GOTOOLCHAIN=local go version 2>/dev/null | grep -Eq 'go1\.(2[6-9]|[3-9][0-9])'; then
 		go=$(command -v go)
-		info "Using installed $(go version | awk '{print $3}')"
+		info "Using installed $(GOTOOLCHAIN=local go version | awk '{print $3}')"
 	else
 		info "Downloading Go $GO_VERSION (temporary, removed afterwards)"
 		local tgz="go$GO_VERSION.linux-$goarch.tar.gz" fetched=0
@@ -453,6 +460,67 @@ close_firewall() {
 	done
 }
 
+# ------------------------------------------------------------------ tor -----
+pkg_install() {
+	if command -v apt-get >/dev/null; then
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$@" >/dev/null || {
+			apt-get update -q >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$@" >/dev/null
+		}
+	elif command -v dnf >/dev/null; then
+		dnf install -y -q "$@" || { dnf install -y -q epel-release && dnf install -y -q "$@"; }
+	elif command -v yum >/dev/null; then
+		yum install -y -q epel-release >/dev/null 2>&1 || true
+		yum install -y -q "$@"
+	elif command -v zypper >/dev/null; then
+		zypper -q install -y "$@"
+	elif command -v pacman >/dev/null; then
+		pacman -Sy --noconfirm "$@" >/dev/null
+	else
+		return 1
+	fi
+}
+
+setup_tor() {
+	if ! command -v tor >/dev/null; then
+		info "Installing Tor"
+		pkg_install tor || die "could not install the 'tor' package; install it yourself and rerun with --tor"
+	fi
+	[ -f "$TORRC" ] || touch "$TORRC"
+	if ! grep -q "BEGIN private-talk-terminal" "$TORRC"; then
+		printf '\n# BEGIN private-talk-terminal (managed by install.sh)\nHiddenServiceDir %s/\nHiddenServicePort 22 %s\n# END private-talk-terminal\n' \
+			"$ONION_DIR" "$ONION_LOCAL" >>"$TORRC"
+	fi
+	set_env PTT_ONION_ADDR "$ONION_LOCAL"
+	systemctl enable tor >/dev/null 2>&1 || true
+	systemctl restart tor
+	# Debian/Ubuntu run the daemon as tor@default behind the "tor" wrapper unit
+	if systemctl cat tor@default.service >/dev/null 2>&1; then
+		systemctl restart tor@default || true
+	fi
+	for _ in $(seq 1 60); do
+		[ -s "$ONION_DIR/hostname" ] && break
+		sleep 0.5
+	done
+	[ -s "$ONION_DIR/hostname" ] || die "Tor did not create the onion service; check: journalctl -u tor@default -u tor"
+	ok "Onion service: $(cat "$ONION_DIR/hostname")"
+}
+
+remove_tor() {
+	if [ -f "$TORRC" ] && grep -q "BEGIN private-talk-terminal" "$TORRC"; then
+		sed -i '/^# BEGIN private-talk-terminal/,/^# END private-talk-terminal/d' "$TORRC"
+		systemctl restart tor >/dev/null 2>&1 || true
+	fi
+	if [ $PURGE = 1 ]; then
+		rm -rf "$ONION_DIR"
+	fi
+}
+
+onion_name() {
+	if [ -s "$ONION_DIR/hostname" ]; then
+		cat "$ONION_DIR/hostname"
+	fi
+}
+
 # --------------------------------------------------------------- report -----
 public_ip() {
 	local ip
@@ -485,6 +553,12 @@ ${C_G}${C_B}Private-Talk Terminal is running.${C_0}  ($("$BIN" -version))
   Connect:        ${C_B}ssh ${portflag}guest@$host${C_0}
   Plain mode:     ssh ${portflag}plain@$host
 EOF
+	local onion
+	onion=$(onion_name)
+	if [ -n "$onion" ]; then
+		echo "  Via Tor:        ${C_B}torsocks ssh guest@$onion${C_0}"
+		echo "                  (or: ssh -o ProxyCommand='nc -x 127.0.0.1:9050 %h %p' guest@$onion)"
+	fi
 	[ -n "$fp" ] && echo "  Host key:       $fp   (users see this on first connect)"
 	cat <<EOF
   Config:         $ENV_FILE   (then: systemctl restart ptterm)
@@ -544,6 +618,7 @@ do_install() {
 	add_admin_keys
 	write_unit
 	install_ctl
+	if [ $TOR = 1 ]; then setup_tor; fi
 	open_firewall "$PORT"
 	if [ -n "$old_port" ] && [ "$old_port" != "$PORT" ]; then
 		close_firewall "$old_port"
@@ -582,6 +657,7 @@ do_uninstall() {
 	systemctl daemon-reload 2>/dev/null || true
 	rm -f "$BIN"
 	[ -n "$p" ] && close_firewall "$p"
+	remove_tor
 	[ "$(readlink -f "${BASH_SOURCE[0]:-}")" = "$CTL" ] || rm -f "$CTL"
 	[ $PURGE = 1 ] && rm -f "$CTL"
 	if [ $PURGE = 1 ]; then
@@ -600,6 +676,9 @@ do_status() {
 	echo "Version:  $("$BIN" -version)"
 	echo "Service:  $(systemctl is-active ptterm 2>/dev/null || true) ($(systemctl is-enabled ptterm 2>/dev/null || true))"
 	echo "Port:     $(current_port || echo 2222)"
+	local onion
+	onion=$(onion_name)
+	if [ -n "$onion" ]; then echo "Onion:    $onion (Tor)"; fi
 	local h
 	h=$(sed -n 's/^PTT_HEALTH_ADDR=//p' "$ENV_FILE" 2>/dev/null | tail -1)
 	if [ -n "$h" ] && command -v curl >/dev/null; then

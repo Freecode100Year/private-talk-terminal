@@ -36,6 +36,8 @@ func main() {
 		perIP       = flag.Int("max-per-ip", 3, "maximum concurrent sessions per address (IPv6 per /64)")
 		connPerMin  = flag.Int("conn-per-min", 10, "new sessions per address per minute")
 		tcpPerIP    = flag.Int("max-tcp-per-ip", 8, "raw TCP connections per address, including unauthenticated ones")
+		adminUser   = flag.String("admin-user", envOr("PTT_ADMIN_USER", "admin"), "username admins log in with (their key is checked); everyone else never sends a key")
+		onionAddr   = flag.String("onion-addr", envOr("PTT_ONION_ADDR", ""), "extra listener for a Tor onion service, e.g. 127.0.0.1:2224 (Tor users share one rate-limit bucket)")
 		msgRate     = flag.Float64("msg-rate", 1, "messages per second allowed (sustained)")
 		msgBurst    = flag.Float64("msg-burst", 5, "message burst size")
 		maxLen      = flag.Int("max-len", 500, "maximum message length in characters")
@@ -55,7 +57,10 @@ func main() {
 	if *verbose {
 		level = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	// Everything — including libraries that log through slog.Default() —
+	// goes through a handler that drops network addresses.
+	log := slog.New(redactHandler{slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})})
+	slog.SetDefault(log)
 
 	roomDefs, err := parseRooms(*rooms)
 	if err != nil {
@@ -94,6 +99,8 @@ func main() {
 		AdminKeysPath: *adminKeys,
 		IdleTimeout:   connIdle(*idle),
 		MaxTCPPerIP:   *tcpPerIP,
+		AdminUser:     *adminUser,
+		OnionAddr:     *onionAddr,
 	}, log)
 	if err != nil {
 		log.Error("could not create server", "err", err)
@@ -111,6 +118,33 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("stopped")
+}
+
+// redactHandler removes attributes that could carry a client address
+// (e.g. the SSH library logs "remote" on panics) before they reach the journal.
+type redactHandler struct{ slog.Handler }
+
+var redactKeys = map[string]bool{"remote": true, "remote_addr": true, "addr": true, "ip": true, "client": true, "peer": true, "user": true}
+
+func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
+	clean := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		if redactKeys[strings.ToLower(a.Key)] && !strings.HasPrefix(r.Message, "Private-Talk Terminal listening") &&
+			r.Message != "health endpoint" && r.Message != "onion listener" {
+			a = slog.String(a.Key, "[redacted]")
+		}
+		clean.AddAttrs(a)
+		return true
+	})
+	return h.Handler.Handle(ctx, clean)
+}
+
+func (h redactHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return redactHandler{h.Handler.WithAttrs(as)}
+}
+
+func (h redactHandler) WithGroup(name string) slog.Handler {
+	return redactHandler{h.Handler.WithGroup(name)}
 }
 
 // connIdle is the transport-level idle limit. The chat-level limit (based on

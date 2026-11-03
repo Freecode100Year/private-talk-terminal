@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,6 +34,7 @@ const (
 
 // Event is one line (or block) of output for a client.
 type Event struct {
+	ID      uint64 // non-zero for events broadcast to a room (same for every viewer)
 	Time    time.Time
 	Kind    Kind
 	Room    string
@@ -63,6 +65,8 @@ type Config struct {
 	NickCooldown  time.Duration // between /nick changes
 	MaxPrivate    int           // private rooms alive at once
 	IdleKick      time.Duration // drop sessions that haven't sent anything for this long (0 = never)
+	OnionMaxConns int           // concurrent sessions arriving via Tor (they share one key)
+	OnionPerMin   int           // new Tor sessions per minute
 	Motd          []string      // extra lines shown on connect
 }
 
@@ -106,7 +110,17 @@ func (c *Config) defaults() {
 	if c.MaxPrivate <= 0 {
 		c.MaxPrivate = 500
 	}
+	if c.OnionMaxConns <= 0 {
+		c.OnionMaxConns = 300
+	}
+	if c.OnionPerMin <= 0 {
+		c.OnionPerMin = 120
+	}
 }
+
+// OnionKey is the address key shared by every session that arrives through
+// the Tor onion listener.
+const OnionKey = "onion"
 
 var (
 	ErrBanned       = errors.New("this address is temporarily banned")
@@ -126,9 +140,9 @@ type room struct {
 // Client is one connected session.
 type Client struct {
 	ID    uint64
-	Out   <-chan Event
+	Out   <-chan *Event   // events are shared between recipients: treat as read-only
 	Done  <-chan struct{} // closed when the hub drops this client (kick/ban/disconnect)
-	out   chan Event
+	out   chan *Event
 	done  chan struct{}
 	once  sync.Once
 	ipKey string
@@ -165,7 +179,7 @@ func (c *Client) close(reason string) {
 
 // send never blocks: a client that stops reading loses events rather than
 // stalling the whole room.
-func (c *Client) send(ev Event) {
+func (c *Client) send(ev *Event) {
 	if ev.Time.IsZero() {
 		ev.Time = time.Now()
 	}
@@ -190,6 +204,7 @@ type Hub struct {
 	perIP    map[string]int
 	connLog  map[string][]time.Time
 	reports  []string
+	eventID  uint64
 	shutdown bool
 }
 
@@ -233,14 +248,18 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 		delete(h.bans, ipKey)
 	}
 	if !admin {
+		maxConns, perMin := h.cfg.MaxConnsPerIP, h.cfg.ConnPerMinute
+		if ipKey == OnionKey {
+			maxConns, perMin = h.cfg.OnionMaxConns, h.cfg.OnionPerMin
+		}
 		if len(h.clients) >= h.cfg.MaxClients {
 			return nil, ErrFull
 		}
-		if h.perIP[ipKey] >= h.cfg.MaxConnsPerIP {
+		if h.perIP[ipKey] >= maxConns {
 			return nil, ErrTooManyConns
 		}
 		log := pruneTimes(h.connLog[ipKey], now.Add(-time.Minute))
-		if len(log) >= h.cfg.ConnPerMinute {
+		if len(log) >= perMin {
 			h.connLog[ipKey] = log
 			return nil, ErrConnRate
 		}
@@ -250,7 +269,7 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 	h.nextID++
 	c := &Client{
 		ID:         h.nextID,
-		out:        make(chan Event, 256),
+		out:        make(chan *Event, 128),
 		done:       make(chan struct{}),
 		ipKey:      ipKey,
 		admin:      admin,
@@ -267,13 +286,13 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 	h.byNick[strings.ToLower(c.nick)] = c
 	h.perIP[ipKey]++
 
-	c.send(Event{Kind: KindInfo, Text: fmt.Sprintf("Welcome, %s · 欢迎！你的身份是随机分配的。", c.nick), Lines: []string{
+	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("Welcome, %s · 欢迎！你的身份是随机分配的。", c.nick), Lines: []string{
 		"输入文字后按 Enter 发送。/help 查看全部命令。",
 		"Type and press Enter to talk. /help lists all commands.",
 		"提醒：SSH 只加密传输，服务器能看到消息内容；不要发送真实身份信息。",
 	}})
 	if len(h.cfg.Motd) > 0 {
-		c.send(Event{Kind: KindNotice, Text: h.cfg.Motd[0], Lines: h.cfg.Motd[1:]})
+		c.send(&Event{Kind: KindNotice, Text: h.cfg.Motd[0], Lines: h.cfg.Motd[1:]})
 	}
 	h.joinLocked(c, h.public[0])
 	return c, nil
@@ -311,7 +330,7 @@ func (h *Hub) Shutdown(msg string) {
 	defer h.mu.Unlock()
 	h.shutdown = true
 	for _, c := range h.clients {
-		c.send(Event{Kind: KindNotice, Text: msg})
+		c.send(&Event{Kind: KindNotice, Text: msg})
 	}
 	for _, c := range h.clients {
 		h.removeLocked(c, msg, "left")
@@ -473,7 +492,7 @@ func (h *Hub) helpLocked(c *Client) {
 			"/reports               最近的举报 · recent reports",
 		)
 	}
-	c.send(Event{Kind: KindInfo, Text: "Commands · 命令", Lines: lines})
+	c.send(&Event{Kind: KindInfo, Text: "Commands · 命令", Lines: lines})
 }
 
 func (h *Hub) roomsLocked(c *Client) {
@@ -489,7 +508,7 @@ func (h *Hub) roomsLocked(c *Client) {
 	if r := h.rooms[c.room]; r != nil && r.private {
 		lines = append(lines, fmt.Sprintf("▸ %s (private) %d users", h.roomLabel(c.room), len(r.members)))
 	}
-	c.send(Event{Kind: KindInfo, Text: fmt.Sprintf("Rooms · 频道 — %d online", len(h.clients)), Lines: lines})
+	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("Rooms · 频道 — %d online", len(h.clients)), Lines: lines})
 }
 
 func (h *Hub) cmdJoinLocked(c *Client, name string) {
@@ -547,8 +566,9 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	c.room = name
 	r.history = h.pruneHistory(r.history, time.Now())
 	for _, ev := range r.history {
-		ev.History = true
-		c.send(ev)
+		e := ev
+		e.History = true
+		c.send(&e)
 	}
 	r.members[c.ID] = c
 	h.roomSystemLocked(r, fmt.Sprintf("%s joined.", c.nick))
@@ -556,7 +576,7 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	if r.private {
 		topic = "private room · 私人房间"
 	}
-	c.send(Event{Kind: KindInfo, Room: name, Text: fmt.Sprintf("Now in %s — %s — %d here", h.roomLabel(name), topic, len(r.members))})
+	c.send(&Event{Kind: KindInfo, Room: name, Text: fmt.Sprintf("Now in %s — %s — %d here", h.roomLabel(name), topic, len(r.members))})
 }
 
 func (h *Hub) gcRoomLocked(r *room) {
@@ -587,8 +607,9 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 		return
 	}
 	r := h.rooms[c.room]
-	ev := Event{Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text}
-	r.history = append(r.history, ev)
+	h.eventID++
+	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text}
+	r.history = append(r.history, *ev)
 	if len(r.history) > h.cfg.HistorySize {
 		r.history = append(r.history[:0:0], r.history[len(r.history)-h.cfg.HistorySize:]...)
 	}
@@ -620,9 +641,9 @@ func (h *Hub) dmLocked(c *Client, target, text string) {
 	now := time.Now()
 	if !to.ignores[c.ID] { // ignored senders aren't told, so ignoring can't be probed
 		to.lastDMFrom = c.nick
-		to.send(Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
+		to.send(&Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
 	}
-	c.send(Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text})
+	c.send(&Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text})
 }
 
 func (h *Hub) nickLocked(c *Client, n string) {
@@ -686,7 +707,7 @@ func (h *Hub) whoLocked(c *Client) {
 	if more > 0 {
 		lines = append(lines, fmt.Sprintf("  … and %d more", more))
 	}
-	c.send(Event{Kind: KindInfo, Text: fmt.Sprintf("%d in %s · %d online total", len(r.members), h.roomLabel(c.room), len(h.clients)), Lines: lines})
+	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("%d in %s · %d online total", len(r.members), h.roomLabel(c.room), len(h.clients)), Lines: lines})
 }
 
 func (h *Hub) adminLocked(c *Client, cmd, rest string) {
@@ -699,8 +720,10 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 			h.errorf(c, "Usage: /broadcast <text>")
 			return
 		}
+		h.eventID++
+		ev := &Event{ID: h.eventID, Time: time.Now(), Kind: KindNotice, From: c.nick, Text: text}
 		for _, o := range h.clients {
-			o.send(Event{Kind: KindNotice, From: c.nick, Text: text})
+			o.send(ev)
 		}
 		return
 	case "unbanall":
@@ -713,7 +736,7 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 			h.infof(c, "No reports. 暂无举报。")
 			return
 		}
-		c.send(Event{Kind: KindInfo, Text: fmt.Sprintf("%d recent reports", len(h.reports)), Lines: append([]string(nil), h.reports...)})
+		c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("%d recent reports", len(h.reports)), Lines: append([]string(nil), h.reports...)})
 		return
 	case "topic":
 		r := h.rooms[c.room]
@@ -744,14 +767,19 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 			minutes = 10
 		}
 		t.mutedUntil = time.Now().Add(time.Duration(minutes) * time.Minute)
-		t.send(Event{Kind: KindError, Text: fmt.Sprintf("You were muted for %d min by an admin. 你被禁言 %d 分钟。", minutes, minutes)})
+		t.send(&Event{Kind: KindError, Text: fmt.Sprintf("You were muted for %d min by an admin. 你被禁言 %d 分钟。", minutes, minutes)})
 		h.infof(c, "Muted %s for %d min.", t.nick, minutes)
 	case "unmute":
 		t.mutedUntil = time.Time{}
 		t.violations = 0
-		t.send(Event{Kind: KindInfo, Text: "You can talk again. 你已解除禁言。"})
+		t.send(&Event{Kind: KindInfo, Text: "You can talk again. 你已解除禁言。"})
 		h.infof(c, "Unmuted %s.", t.nick)
 	case "ban":
+		if t.ipKey == OnionKey { // banning the shared Tor key would lock out every Tor user
+			h.removeLocked(t, "kicked by admin", "was kicked")
+			h.infof(c, "%s came via Tor and can't be banned by address — kicked instead. Use /mute for repeat offenders.", arg)
+			return
+		}
 		if minutes <= 0 {
 			minutes = 60
 		}
@@ -820,7 +848,7 @@ func (h *Hub) reportLocked(c *Client, nick, reason string) {
 	for _, o := range h.clients {
 		if o.admin {
 			admins++
-			o.send(Event{Kind: KindNotice, Text: "Report · 举报", Lines: []string{line}})
+			o.send(&Event{Kind: KindNotice, Text: "Report · 举报", Lines: []string{line}})
 		}
 	}
 	if admins > 0 {
@@ -833,6 +861,25 @@ func (h *Hub) reportLocked(c *Client, nick, reason string) {
 // ParseZone accepts IANA names (Asia/Shanghai), "utc"/"local", and
 // fixed offsets like +8, -5, +05:30.
 func ParseZone(s string) (*time.Location, error) {
+	key := strings.ToLower(strings.TrimSpace(s))
+	if v, ok := zoneCache.Load(key); ok {
+		return v.(*time.Location), nil
+	}
+	loc, err := parseZone(s)
+	if err == nil {
+		if n := zoneCount.Add(1); n <= 2000 { // bounded: zones are interned so renders can be shared
+			zoneCache.Store(key, loc)
+		}
+	}
+	return loc, err
+}
+
+var (
+	zoneCache sync.Map
+	zoneCount atomic.Int64
+)
+
+func parseZone(s string) (*time.Location, error) {
 	s = strings.TrimSpace(s)
 	switch strings.ToLower(s) {
 	case "utc", "gmt", "z":
@@ -947,18 +994,19 @@ func (h *Hub) roomSystemLocked(r *room, text string) {
 	if r == nil {
 		return
 	}
-	ev := Event{Time: time.Now(), Kind: KindSystem, Room: r.name, Text: text}
+	h.eventID++
+	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: KindSystem, Room: r.name, Text: text}
 	for _, m := range r.members {
 		m.send(ev)
 	}
 }
 
 func (h *Hub) infof(c *Client, format string, a ...any) {
-	c.send(Event{Kind: KindInfo, Text: fmt.Sprintf(format, a...)})
+	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf(format, a...)})
 }
 
 func (h *Hub) errorf(c *Client, format string, a ...any) {
-	c.send(Event{Kind: KindError, Text: fmt.Sprintf(format, a...)})
+	c.send(&Event{Kind: KindError, Text: fmt.Sprintf(format, a...)})
 }
 
 func (h *Hub) pruneHistory(hist []Event, now time.Time) []Event {
