@@ -1,0 +1,49 @@
+[Unit]
+Description=Private-Talk Terminal (anonymous SSH chat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# DynamicUser creates a throwaway unprivileged user; StateDirectory keeps the
+# SSH host key in /var/lib/ptterm across restarts.
+DynamicUser=yes
+StateDirectory=ptterm
+WorkingDirectory=/var/lib/ptterm
+EnvironmentFile=-/etc/ptterm.env
+ExecStart=/usr/local/bin/ptterm -addr ${PTT_ADDR} -host-key /var/lib/ptterm/host_ed25519 $PTT_ARGS
+Environment=PTT_ADDR=:2222
+Restart=always
+RestartSec=2
+
+# Hardening: the chat process can't touch the rest of the system.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0077
+LimitNOFILE=65536
+MemoryMax=512M
+TasksMax=4096
+
+[Install]
+WantedBy=multi-user.target
