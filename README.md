@@ -23,6 +23,20 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 
 纯 Go 单个静态二进制，无数据库，所有数据只在内存里。
 
+## 在线实例
+
+Private-Talk Terminal `v0.2.0` 已部署并可从公网连接：
+
+```bash
+ssh -p 2222 guest@107.175.34.91
+```
+
+项目域名入口为 `term.freedom8964.com:2222`。该子域名的 DNS 记录尚未配置；在 Cloudflare 为 `term` 添加指向 `107.175.34.91` 的 A 记录，并设为 **DNS only（灰云）** 后，可使用：
+
+```bash
+ssh -p 2222 guest@term.freedom8964.com
+```
+
 ---
 
 ## 一键部署
