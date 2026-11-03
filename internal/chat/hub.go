@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	mrand "math/rand/v2"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -46,6 +47,7 @@ type Event struct {
 	Lines   []string // extra lines for multi-line info blocks
 	History bool     // replayed from the room buffer on join
 	sender  uint64   // client ID of the author (never shown), for /forget
+	Invite  *Invite  // set when the message carries a passphrase-protected HTML Room link
 }
 
 // RoomDef describes a public room created at startup.
@@ -74,6 +76,9 @@ type Config struct {
 	// Facts about the deployment that /privacy reports to users.
 	PersistBans bool // address-hash key stored on disk (-ban-file)
 	TorEnabled  bool // an onion listener is configured
+	// SecureURL is the HTML Room creator /secure points to; invites to other
+	// hosts are shown with a warning.
+	SecureURL string
 }
 
 func (c *Config) defaults() {
@@ -115,6 +120,9 @@ func (c *Config) defaults() {
 	}
 	if c.MaxPrivate <= 0 {
 		c.MaxPrivate = 500
+	}
+	if c.SecureURL == "" {
+		c.SecureURL = "https://hr50.freedom8964.com/"
 	}
 	if c.OnionMaxConns <= 0 {
 		c.OnionMaxConns = 300
@@ -215,6 +223,7 @@ type Hub struct {
 	reports  []string
 	eventID  uint64
 	banVer   uint64 // bumped on every ban change, for persistence
+	inviteN  int    // invite numbers for /link
 	shutdown bool
 }
 
@@ -470,6 +479,8 @@ func (h *Hub) command(c *Client, line string) Result {
 	case "report":
 		target, reason, _ := strings.Cut(rest, " ")
 		h.reportLocked(c, strings.TrimPrefix(target, "@"), reason)
+	case "secure", "e2e", "encrypt":
+		h.secureLocked(c)
 	case "privacy", "policy":
 		h.privacyLocked(c)
 	case "forget":
@@ -504,6 +515,8 @@ func (h *Hub) helpLocked(c *Client) {
 		"/ignore <nick>         屏蔽某人（/unignore 取消）· hide someone",
 		"/report <nick> <why>   举报给管理员 · report to moderators",
 		"/tz <zone>             时区，如 /tz Asia/Shanghai 或 /tz +8 · timezone",
+		"/secure                端到端加密房间（连服务器都看不到）· end-to-end encrypted room",
+		"/link [N]              显示加密房间邀请的完整链接 · show an invite link",
 		"/privacy               本服务器的数据政策 · what this server keeps",
 		"/forget                从房间历史删除你的消息 · erase your messages",
 		"房间栏 +N = 其他房间的未读消息，@N = 有人在那边 @了你 · +N unread, @N mentioned",
@@ -635,7 +648,10 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 	if _, ok := h.clients[c.ID]; !ok {
 		return
 	}
-	text = Sanitize(text, h.cfg.MaxMsgRunes)
+	text, inv, okText := h.checkInviteLocked(c, text)
+	if !okText {
+		return
+	}
 	if text == "" {
 		if kind == KindAction {
 			h.errorf(c, "Usage: /me <action>")
@@ -648,7 +664,7 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 	r := h.rooms[c.room]
 	r.seq++
 	h.eventID++
-	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, sender: c.ID}
+	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, sender: c.ID, Invite: inv}
 	r.history = append(r.history, *ev)
 	if len(r.history) > h.cfg.HistorySize {
 		r.history = append(r.history[:0:0], r.history[len(r.history)-h.cfg.HistorySize:]...)
@@ -698,7 +714,10 @@ func (h *Hub) notifyMentionsLocked(c *Client, r *room, ev *Event) {
 }
 
 func (h *Hub) dmLocked(c *Client, target, text string) {
-	text = Sanitize(text, h.cfg.MaxMsgRunes)
+	text, inv, okText := h.checkInviteLocked(c, text)
+	if !okText {
+		return
+	}
 	if target == "" || text == "" {
 		h.errorf(c, "Usage: /msg <nick> <message>")
 		return
@@ -718,9 +737,9 @@ func (h *Hub) dmLocked(c *Client, target, text string) {
 	now := time.Now()
 	if !to.ignores[c.ID] { // ignored senders aren't told, so ignoring can't be probed
 		to.lastDMFrom = c.nick
-		to.send(&Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
+		to.send(&Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text, Invite: inv})
 	}
-	c.send(&Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text})
+	c.send(&Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text, Invite: inv})
 }
 
 func (h *Hub) nickLocked(c *Client, n string) {
@@ -1040,6 +1059,51 @@ func (h *Hub) tzLocked(c *Client, arg string) {
 	h.infof(c, "Timezone set to %s — now %s. 时区已设置。", loc.String(), time.Now().In(loc).Format("15:04"))
 }
 
+// checkInviteLocked sanitises a message and applies the invite policy: a
+// link without a passphrase is refused (it is the room key, and this server
+// sees everything), a protected one is numbered for /link. ok=false means
+// the message must not be sent.
+func (h *Hub) checkInviteLocked(c *Client, text string) (string, *Invite, bool) {
+	text = Sanitize(text, MaxInviteRunes)
+	inv, parsed := FindInvite(text)
+	switch {
+	case !parsed:
+		h.errorf(c, "这看起来像加密房间链接，但无法识别，为安全起见没有发出。Looks like an encrypted-room link but can't be read; not sent.")
+		return "", nil, false
+	case inv == nil:
+		if len([]rune(text)) > h.cfg.MaxMsgRunes {
+			text = string([]rune(text)[:h.cfg.MaxMsgRunes])
+		}
+		return text, nil, true
+	case !inv.Encrypted:
+		c.send(&Event{Kind: KindError, Text: "已拦截，没有发出：这个加密房间链接没有设口令。", Lines: []string{
+			"没有口令的链接本身就是房间钥匙，而这里发的一切服务器（和它的运营者）都能看到。",
+			"请重新创建房间并点「随机生成口令」，把新链接发到这里，口令通过别的渠道告诉对方。/secure 查看步骤",
+			"Blocked: this link has no passphrase, so it IS the room key — and this server sees everything posted here.",
+		}})
+		return "", nil, false
+	}
+	h.inviteN++
+	inv.N = h.inviteN
+	if u, err := url.Parse(h.cfg.SecureURL); err == nil && strings.EqualFold(u.Host, inv.Host) {
+		inv.Trusted = true
+	}
+	return text, inv, true
+}
+
+func (h *Hub) secureLocked(c *Client) {
+	c.send(&Event{Kind: KindInfo, Text: "端到端加密房间 · End-to-end encrypted room（连本服务器都看不到内容）", Lines: []string{
+		"钥匙在你自己的设备上生成，本服务器不参与，也拿不到：",
+		"1. 在浏览器里打开 " + h.cfg.SecureURL,
+		"2. 点「随机生成口令」，再点「创建房间」",
+		"3. 复制房间链接，粘贴到这里（或 /msg 私聊发给对方）",
+		"4. 口令用另一条渠道告诉对方（电话、当面、别的聊天软件），不要发在这里",
+		"5. 进房后和对方互相核对安全码，一致才说明没人冒充",
+		"没设口令的链接会被拦截：那种链接本身就是钥匙。收到的邀请用 /link 查看完整链接。",
+		"Keys are made in your browser; this server never sees them. Use a passphrase and share it elsewhere.",
+	}})
+}
+
 // privacyLocked tells the user, from the live configuration, what this
 // server keeps about them and what it can't promise.
 func (h *Hub) privacyLocked(c *Client) {
@@ -1066,6 +1130,7 @@ func (h *Hub) privacyLocked(c *Client) {
 		"空闲   " + idle + " 不发言自动断开",
 		"管理员 可以踢出、禁言、封禁（都会公开显示）；看不到私聊，聊天室里也没有查看 IP 的功能",
 		"删除   /forget 立刻从房间历史中删除你本次连接发过的所有消息",
+		"加密   需要连服务器都看不到的对话：/secure（端到端加密房间，钥匙只在你的设备上）",
 		"边界   SSH 只加密传输：服务器进程能看到明文，VPS 运营者在系统层面能看到连接来源 IP。",
 		"       想对运营者也隐藏 IP 请用 Tor；任何时候都不要发送能识别你身份的信息。",
 	}
