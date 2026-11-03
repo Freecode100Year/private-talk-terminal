@@ -5,7 +5,7 @@
 一条 SSH 命令进入全球公共聊天室。不用网页、不用注册、不用手机号或邮箱，也不用装专用客户端：Windows CMD / PowerShell、Linux、macOS 自带的 `ssh` 就够了。
 
 ```
-ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@term.freedom8964.com
+ssh -p 2222 guest@term.freedom8964.com
 ```
 
 ```
@@ -28,7 +28,7 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 Private-Talk Terminal `v0.2.0` 已部署并可从公网连接：
 
 ```bash
-ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@term.freedom8964.com
+ssh -p 2222 guest@term.freedom8964.com
 ```
 
 ---
