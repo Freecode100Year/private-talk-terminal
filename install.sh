@@ -306,6 +306,9 @@ SystemCallFilter=~@privileged
 SystemCallErrorNumber=EPERM
 UMask=0077
 LimitNOFILE=65536
+# Never write process memory (which holds chat messages) to disk.
+LimitCORE=0
+Environment=GOTRACEBACK=single
 TasksMax=8192
 
 [Install]

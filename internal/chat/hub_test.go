@@ -490,3 +490,63 @@ func TestBanListUnbanAndPersistAPI(t *testing.T) {
 		t.Fatalf("restored ban not enforced: %v", err)
 	}
 }
+
+func TestForgetErasesOwnHistoryOnly(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(a, "secret from a")
+	h.Handle(b, "hello from b")
+	h.Handle(a, "/join chinese")
+	h.Handle(a, "another secret")
+	drain(a)
+	h.Handle(a, "/forget")
+	if !has(drain(a), KindInfo, "删除你的 2 条消息") {
+		t.Fatal("forget did not report 2 erased messages")
+	}
+	c, _ := h.Connect("ip-c", false)
+	evs := drain(c)
+	for _, e := range evs {
+		if e.History && strings.Contains(e.Text, "secret") {
+			t.Fatal("forgotten message replayed to a newcomer")
+		}
+	}
+	if !has(evs, KindChat, "hello from b") {
+		t.Fatal("other people's messages were erased too")
+	}
+	h.mu.Lock()
+	for _, r := range h.rooms {
+		for _, e := range r.history[len(r.history):cap(r.history)] {
+			if strings.Contains(e.Text, "secret") {
+				h.mu.Unlock()
+				t.Fatal("erased text still in the history backing array")
+			}
+		}
+	}
+	h.mu.Unlock()
+}
+
+func TestPrivacyReflectsConfig(t *testing.T) {
+	h := NewHub(Config{HistorySize: 20, HistoryTTL: 30 * time.Minute, PersistBans: true, TorEnabled: true})
+	a, _ := h.Connect("ip-a", false)
+	drain(a)
+	h.Handle(a, "/privacy")
+	evs := drain(a)
+	if len(evs) != 1 {
+		t.Fatalf("got %d events", len(evs))
+	}
+	all := strings.Join(evs[0].Lines, "\n")
+	for _, want := range []string{"最多 20 条", "30m0s", "已开启持久化", ".onion", "不写入日志", "能看到连接来源 IP"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("/privacy missing %q:\n%s", want, all)
+		}
+	}
+	h2 := newTestHub()
+	b, _ := h2.Connect("ip-b", false)
+	drain(b)
+	h2.Handle(b, "/privacy")
+	all = strings.Join(drain(b)[0].Lines, "\n")
+	if !strings.Contains(all, "仅在内存") || !strings.Contains(all, "未开启") {
+		t.Errorf("defaults not reported:\n%s", all)
+	}
+}

@@ -45,6 +45,7 @@ type Event struct {
 	Text    string
 	Lines   []string // extra lines for multi-line info blocks
 	History bool     // replayed from the room buffer on join
+	sender  uint64   // client ID of the author (never shown), for /forget
 }
 
 // RoomDef describes a public room created at startup.
@@ -70,6 +71,9 @@ type Config struct {
 	OnionMaxConns int           // concurrent sessions arriving via Tor (they share one key)
 	OnionPerMin   int           // new Tor sessions per minute
 	Motd          []string      // extra lines shown on connect
+	// Facts about the deployment that /privacy reports to users.
+	PersistBans bool // address-hash key stored on disk (-ban-file)
+	TorEnabled  bool // an onion listener is configured
 }
 
 func (c *Config) defaults() {
@@ -304,6 +308,7 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 		"输入文字后按 Enter 发送。/help 查看全部命令。",
 		"Type and press Enter to talk. /help lists all commands.",
 		"提醒：SSH 只加密传输，服务器能看到消息内容；不要发送真实身份信息。",
+		"本服务器存什么、不存什么：/privacy    删除你发过的消息：/forget",
 	}})
 	if len(h.cfg.Motd) > 0 {
 		c.send(&Event{Kind: KindNotice, Text: h.cfg.Motd[0], Lines: h.cfg.Motd[1:]})
@@ -465,6 +470,10 @@ func (h *Hub) command(c *Client, line string) Result {
 	case "report":
 		target, reason, _ := strings.Cut(rest, " ")
 		h.reportLocked(c, strings.TrimPrefix(target, "@"), reason)
+	case "privacy", "policy":
+		h.privacyLocked(c)
+	case "forget":
+		h.forgetLocked(c)
 	case "tz", "time":
 		h.tzLocked(c, rest)
 	case "whoami":
@@ -495,6 +504,8 @@ func (h *Hub) helpLocked(c *Client) {
 		"/ignore <nick>         屏蔽某人（/unignore 取消）· hide someone",
 		"/report <nick> <why>   举报给管理员 · report to moderators",
 		"/tz <zone>             时区，如 /tz Asia/Shanghai 或 /tz +8 · timezone",
+		"/privacy               本服务器的数据政策 · what this server keeps",
+		"/forget                从房间历史删除你的消息 · erase your messages",
 		"房间栏 +N = 其他房间的未读消息，@N = 有人在那边 @了你 · +N unread, @N mentioned",
 		"/clear                 清屏 · clear screen",
 		"/quit                  退出 · disconnect",
@@ -637,7 +648,7 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 	r := h.rooms[c.room]
 	r.seq++
 	h.eventID++
-	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text}
+	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, sender: c.ID}
 	r.history = append(r.history, *ev)
 	if len(r.history) > h.cfg.HistorySize {
 		r.history = append(r.history[:0:0], r.history[len(r.history)-h.cfg.HistorySize:]...)
@@ -1027,6 +1038,63 @@ func (h *Hub) tzLocked(c *Client, arg string) {
 	}
 	c.loc = loc
 	h.infof(c, "Timezone set to %s — now %s. 时区已设置。", loc.String(), time.Now().In(loc).Format("15:04"))
+}
+
+// privacyLocked tells the user, from the live configuration, what this
+// server keeps about them and what it can't promise.
+func (h *Hub) privacyLocked(c *Client) {
+	bans := "仅在内存，重启即清空 · memory only"
+	if h.cfg.PersistBans {
+		bans = "已开启持久化：仅被封禁地址的哈希写入磁盘 · persisted (hashes of banned addresses only)"
+	}
+	tor := "未开启 · not enabled on this server"
+	if h.cfg.TorEnabled {
+		tor = "已开启，可通过 .onion 地址连接，服务器看不到你的 IP · available"
+	}
+	idle := "不限 · none"
+	if h.cfg.IdleKick > 0 {
+		idle = h.cfg.IdleKick.String()
+	}
+	lines := []string{
+		fmt.Sprintf("消息   只在内存里，每个房间最多 %d 条、最长 %s，然后自动删除；私聊不保存", h.cfg.HistorySize, h.cfg.HistoryTTL),
+		"       messages live in memory only and expire; private messages are never stored",
+		"不记录 IP、昵称、消息内容都不写入日志；不收集 SSH 公钥；没有账号",
+		"       no IPs, nicknames or message text in logs; no public keys; no accounts",
+		"地址   只用来限流和封禁，以匿名哈希保存，不显示给任何人（包括管理员）",
+		"封禁   " + bans,
+		"Tor    " + tor,
+		"空闲   " + idle + " 不发言自动断开",
+		"管理员 可以踢出、禁言、封禁（都会公开显示）；看不到私聊，聊天室里也没有查看 IP 的功能",
+		"删除   /forget 立刻从房间历史中删除你本次连接发过的所有消息",
+		"边界   SSH 只加密传输：服务器进程能看到明文，VPS 运营者在系统层面能看到连接来源 IP。",
+		"       想对运营者也隐藏 IP 请用 Tor；任何时候都不要发送能识别你身份的信息。",
+	}
+	c.send(&Event{Kind: KindInfo, Text: "本服务器的数据政策 · Privacy on this server", Lines: lines})
+}
+
+// forgetLocked removes every message this session posted from all room
+// histories. Lines already on other people's screens can't be recalled.
+func (h *Hub) forgetLocked(c *Client) {
+	if !h.takeToken(c, 1) {
+		return
+	}
+	n := 0
+	for _, r := range h.rooms {
+		kept := r.history[:0]
+		for _, ev := range r.history {
+			if ev.sender == c.ID {
+				n++
+				continue
+			}
+			kept = append(kept, ev)
+		}
+		// clear the tail so removed texts don't linger in the backing array
+		for i := len(kept); i < len(r.history); i++ {
+			r.history[i] = Event{}
+		}
+		r.history = kept
+	}
+	h.infof(c, "已从房间历史删除你的 %d 条消息；已经显示在别人屏幕上的无法撤回。Erased %d of your messages from room history.", n, n)
 }
 
 // --- abuse protection -------------------------------------------------------

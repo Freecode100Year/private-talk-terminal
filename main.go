@@ -92,6 +92,8 @@ func main() {
 		MsgBurst:      *msgBurst,
 		IdleKick:      *idle,
 		Motd:          motdLines,
+		PersistBans:   *banFile != "",
+		TorEnabled:    *onionAddr != "",
 	})
 
 	srv, err := server.New(hub, server.Options{
