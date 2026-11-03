@@ -49,7 +49,7 @@ die() {
 }
 
 TMP=""
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
+cleanup() { if [ -n "$TMP" ]; then rm -rf "$TMP"; fi; }
 trap cleanup EXIT
 
 usage() {
@@ -171,7 +171,9 @@ port_owner() { # prints the process listening on TCP port $1 ("unknown" if it ca
 }
 
 current_port() {
-	[ -f "$ENV_FILE" ] && sed -n 's/^PTT_ADDR=.*:\([0-9]\{1,5\}\)$/\1/p' "$ENV_FILE" | tail -1
+	if [ -f "$ENV_FILE" ]; then
+		sed -n 's/^PTT_ADDR=.*:\([0-9]\{1,5\}\)$/\1/p' "$ENV_FILE" | tail -1
+	fi
 }
 
 # --------------------------------------------------------------- binary -----
