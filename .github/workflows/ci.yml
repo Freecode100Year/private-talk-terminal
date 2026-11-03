@@ -112,11 +112,13 @@ jobs:
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --tor
           onion=$(sudo cat /var/lib/tor/ptterm/hostname)
           echo "$onion" | grep -Eq '^[a-z2-7]{56}\.onion$'
-          sudo ptterm-ctl status | grep -q "Onion:"
+          sudo ptterm-ctl status > /tmp/status.txt
+          grep -q "Onion:" /tmp/status.txt
           # the local side of the onion service accepts chat sessions
           out=$( (sleep 1; echo /quit) | ssh -T -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
           echo "$out" | grep -q "Welcome"
-          sudo ss -ltn | grep -q '127.0.0.1:2224 '
+          ss -ltn > /tmp/ss.txt
+          grep -q '127.0.0.1:2224 ' /tmp/ss.txt
 
       - name: Status, reinstall, uninstall
         run: |
@@ -124,7 +126,8 @@ jobs:
           set -x
           sudo ptterm-ctl status
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --port 2299
-          ss -ltn | grep -q ':2299 '
+          ss -ltn > /tmp/ss.txt
+          grep -q ':2299 ' /tmp/ss.txt
           sudo ptterm-ctl uninstall --purge
           if grep -q "private-talk-terminal" /etc/tor/torrc; then echo "torrc not cleaned"; exit 1; fi
           test ! -e /var/lib/tor/ptterm
