@@ -5,7 +5,7 @@
 一条 SSH 命令进入全球公共聊天室。不用网页、不用注册、不用手机号或邮箱，也不用装专用客户端：Windows CMD / PowerShell、Linux、macOS 自带的 `ssh` 就够了。
 
 ```
-ssh -p 2222 guest@term.freedom8964.com
+ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@term.freedom8964.com
 ```
 
 ```
@@ -28,7 +28,7 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 Private-Talk Terminal `v0.2.0` 已部署并可从公网连接：
 
 ```bash
-ssh -p 2222 guest@term.freedom8964.com
+ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@term.freedom8964.com
 ```
 
 ---
@@ -90,13 +90,13 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 
 | 方式 | 命令 |
 | --- | --- |
-| 完整界面（推荐） | `ssh -p 2222 guest@HOST` |
-| 纯文本模式（老终端 / CMD 乱码时） | `ssh -p 2222 plain@HOST` |
-| 无终端 / 脚本 / 机器人 | `ssh -T -p 2222 guest@HOST` |
-| 最大匿名（不向服务器出示公钥） | `ssh -o PubkeyAuthentication=no -p 2222 guest@HOST` |
+| 完整界面（推荐） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@HOST` |
+| 纯文本模式（老终端 / CMD 乱码时） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
+| 无终端 / 脚本 / 机器人 | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
+| 最大匿名（不向服务器出示公钥） | `ssh -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no -p 2222 guest@HOST` |
 
 - 用户名随便填，没有密码；客户端问密码就直接回车。
-- 首次连接会提示确认主机密钥指纹（安装脚本最后会打印），输入 `yes`。
+- 首次连接会自动记录服务器主机密钥，不再询问 `yes`；之后若密钥变化，SSH 会拒绝连接并提示风险。
 - Windows 10/11 自带 OpenSSH；中文显示推荐 Windows Terminal。老 CMD 乱码时用 `plain@`，或先执行 `chcp 65001`。
 
 ### 命令
