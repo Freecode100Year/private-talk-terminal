@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -19,7 +20,7 @@ import (
 // otherwise the client's own terminal handles line editing.
 func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width int) {
 	p := &plain{w: rw, hub: hub, c: c, pty: hasPty, width: width}
-	p.fmt = Formatter{Styled: false}
+	p.fmt = Formatter{Styled: false, Self: func() string { return hub.Nick(c) }, Loc: func() *time.Location { return hub.Loc(c) }}
 	p.nl = "\n"
 	if hasPty {
 		p.nl = "\r\n"
@@ -103,7 +104,6 @@ func (p *plain) printRaw(s string) {
 }
 
 func (p *plain) printEvent(ev chat.Event) {
-	p.fmt.Self = func() string { return "" }
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.clearInputLocked()

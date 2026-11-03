@@ -1,18 +1,19 @@
 [Unit]
 Description=Private-Talk Terminal (anonymous SSH chat)
+Documentation=https://github.com/Freecode100Year/private-talk-terminal
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 # DynamicUser creates a throwaway unprivileged user; StateDirectory keeps the
-# SSH host key in /var/lib/ptterm across restarts.
+# SSH host key in /var/lib/ptterm across restarts and upgrades.
 DynamicUser=yes
 StateDirectory=ptterm
 WorkingDirectory=/var/lib/ptterm
+Environment=PTT_ADDR=:2222
 EnvironmentFile=-/etc/ptterm.env
 ExecStart=/usr/local/bin/ptterm -addr ${PTT_ADDR} -host-key /var/lib/ptterm/host_ed25519 $PTT_ARGS
-Environment=PTT_ADDR=:2222
 Restart=always
 RestartSec=2
 
@@ -42,8 +43,7 @@ SystemCallFilter=~@privileged
 SystemCallErrorNumber=EPERM
 UMask=0077
 LimitNOFILE=65536
-MemoryMax=512M
-TasksMax=4096
+TasksMax=8192
 
 [Install]
 WantedBy=multi-user.target

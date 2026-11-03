@@ -21,14 +21,10 @@ func Sanitize(s string, maxRunes int) string {
 		if r == utf8.RuneError && size <= 1 {
 			continue
 		}
-		switch {
-		case r == '\t':
+		if r == '\t' {
 			r = ' '
-		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
-			continue
-		case isBidiControl(r):
-			continue
-		case r == 0xfeff: // BOM / zero width no-break space
+		}
+		if !Printable(r) {
 			continue
 		}
 		if maxRunes > 0 && n >= maxRunes {
@@ -38,6 +34,18 @@ func Sanitize(s string, maxRunes int) string {
 		n++
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// Printable reports whether r is safe to show in a terminal: no C0/C1
+// controls (which covers every escape sequence), DEL, bidi controls or BOM.
+func Printable(r rune) bool {
+	switch {
+	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+		return false
+	case isBidiControl(r), r == 0xfeff, r == utf8.RuneError:
+		return false
+	}
+	return true
 }
 
 func isBidiControl(r rune) bool {

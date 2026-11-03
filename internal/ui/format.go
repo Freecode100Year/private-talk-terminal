@@ -36,7 +36,8 @@ func nickColor(n string) lipgloss.Style {
 // Formatter turns events into display lines.
 type Formatter struct {
 	Styled bool
-	Self   func() string // current nickname of the viewer
+	Self   func() string         // current nickname of the viewer
+	Loc    func() *time.Location // viewer's timezone (nil = server local)
 }
 
 func (f Formatter) st(c interface{ RGBA() (r, g, b, a uint32) }, s string) string {
@@ -49,17 +50,23 @@ func (f Formatter) st(c interface{ RGBA() (r, g, b, a uint32) }, s string) strin
 // Lines renders one event to one or more unwrapped lines.
 func (f Formatter) Lines(ev chat.Event) []string {
 	if ev.History && f.Styled { // replayed history: whole line dimmed
-		lines := Formatter{Self: f.Self}.Lines(ev)
+		lines := Formatter{Self: f.Self, Loc: f.Loc}.Lines(ev)
 		faint := lipgloss.NewStyle().Foreground(cTime)
 		for i := range lines {
 			lines[i] = faint.Render(lines[i])
 		}
 		return lines
 	}
-	ts := "[" + ev.Time.Format("15:04") + "] "
-	if ev.Time.IsZero() {
-		ts = "[" + time.Now().Format("15:04") + "] "
+	t := ev.Time
+	if t.IsZero() {
+		t = time.Now()
 	}
+	if f.Loc != nil {
+		if loc := f.Loc(); loc != nil {
+			t = t.In(loc)
+		}
+	}
+	ts := "[" + t.Format("15:04") + "] "
 	if f.Styled {
 		ts = f.st(cTime, ts)
 	}
@@ -77,12 +84,20 @@ func (f Formatter) Lines(ev chat.Event) []string {
 		return nickColor(n).Render(n)
 	}
 
+	text := ev.Text
+	if (ev.Kind == chat.KindChat || ev.Kind == chat.KindAction) && Mentions(text, self) && ev.From != self {
+		if f.Styled {
+			text = lipgloss.NewStyle().Foreground(cNotice).Bold(true).Render(text)
+		} else {
+			text = "» " + text
+		}
+	}
 	var head string
 	switch ev.Kind {
 	case chat.KindChat:
-		head = ts + "<" + nick(ev.From) + "> " + ev.Text
+		head = ts + "<" + nick(ev.From) + "> " + text
 	case chat.KindAction:
-		head = ts + "* " + nick(ev.From) + " " + ev.Text
+		head = ts + "* " + nick(ev.From) + " " + text
 	case chat.KindSystem:
 		head = ts + f.st(cSystem, "-- "+ev.Text)
 	case chat.KindDMIn:
@@ -127,4 +142,32 @@ func Uptime(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%dm", mins)
 	}
+}
+
+// Mentions reports whether text mentions nick (case-insensitive, whole word
+// for Latin nicknames; substring for CJK, which has no word boundaries).
+func Mentions(text, nick string) bool {
+	if nick == "" {
+		return false
+	}
+	lt, ln := strings.ToLower(text), strings.ToLower(nick)
+	for i := 0; ; {
+		j := strings.Index(lt[i:], ln)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(ln)
+		if !isWordByte(lt, start-1) && !isWordByte(lt, end) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+func isWordByte(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	c := s[i]
+	return c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z'
 }

@@ -1,24 +1,36 @@
-VERSION ?= 0.1.0
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
+GOBUILD := CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: build test run dist clean
+.PHONY: build test run dist bench lint clean
 
-go.sum:
-	go mod tidy
+build:
+	$(GOBUILD) -o bin/ptterm .
 
-build: go.sum
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ptterm .
-
-test: go.sum
+test:
 	go test -race ./...
+
+lint:
+	go vet ./...
+	shellcheck -S warning install.sh
+	bash install.sh --print-unit | diff -u deploy/ptterm.service -
 
 run: build
 	./bin/ptterm -addr 127.0.0.1:2222 -host-key ./data/host_ed25519
 
-# Static binaries for typical VPSes (x86_64 and ARM such as Oracle Ampere).
-dist: go.sum
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/ptterm-linux-amd64 .
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/ptterm-linux-arm64 .
+# Static binaries for typical VPSes + checksums (what the release workflow publishes).
+dist:
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o dist/ptterm-linux-amd64 .
+	GOOS=linux GOARCH=arm64 $(GOBUILD) -o dist/ptterm-linux-arm64 .
+	GOOS=linux GOARCH=arm GOARM=7 $(GOBUILD) -o dist/ptterm-linux-armv7 .
+	cd dist && sha256sum ptterm-linux-* > SHA256SUMS
+
+# Load test against a local server with relaxed limits.
+bench: build
+	go build -o bin/ptt-bench ./cmd/ptt-bench
+	./bin/ptterm -addr 127.0.0.1:2299 -host-key ./data/bench_host -max-per-ip 100000 -max-tcp-per-ip 100000 \
+		-conn-per-min 100000 -max-clients 100000 -msg-rate 100 -msg-burst 100 & \
+	PID=$$!; sleep 1; ./bin/ptt-bench -addr 127.0.0.1:2299 -clients 500 -senders 25 -rate 0.5 -duration 20s; kill $$PID
 
 clean:
 	rm -rf bin dist

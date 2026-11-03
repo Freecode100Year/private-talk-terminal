@@ -252,3 +252,104 @@ func TestHistoryTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestIgnore(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(a, "/nick Annoying")
+	h.Handle(b, "/ignore Annoying")
+	drain(a)
+	drain(b)
+	h.Handle(a, "blah")
+	h.Handle(a, "/msg "+h.Nick(b)+" psst")
+	evs := drain(b)
+	if has(evs, KindChat, "blah") || has(evs, KindDMIn, "psst") {
+		t.Fatal("ignored user's messages delivered")
+	}
+	if !has(drain(a), KindDMOut, "psst") {
+		t.Fatal("sender should not learn they are ignored")
+	}
+	h.Handle(b, "/unignore Annoying")
+	h.Handle(a, "blah again")
+	if !has(drain(b), KindChat, "blah again") {
+		t.Fatal("unignore failed")
+	}
+}
+
+func TestReport(t *testing.T) {
+	h := newTestHub()
+	adm, _ := h.Connect("ip-admin", true)
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(b, "/nick Troll")
+	drain(adm)
+	h.Handle(a, "/report Troll spamming links")
+	evs := drain(adm)
+	found := false
+	for _, e := range evs {
+		if e.Kind == KindNotice && len(e.Lines) == 1 && strings.Contains(e.Lines[0], "Troll") && strings.Contains(e.Lines[0], "spamming") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("admin not notified: %+v", evs)
+	}
+	h.Handle(a, "/reports")
+	if has(drain(a), KindInfo, "recent reports") {
+		t.Fatal("non-admin can read reports")
+	}
+}
+
+func TestTimezone(t *testing.T) {
+	for in, want := range map[string]int{"+8": 8 * 3600, "-5": -5 * 3600, "+05:30": 5*3600 + 1800, "UTC+9": 9 * 3600, "utc": 0} {
+		loc, err := ParseZone(in)
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if _, off := time.Now().In(loc).Zone(); off != want {
+			t.Fatalf("%s: offset %d want %d", in, off, want)
+		}
+	}
+	if _, err := ParseZone("../../etc/passwd"); err == nil {
+		t.Fatal("path traversal accepted")
+	}
+	if _, err := ParseZone("+99"); err == nil {
+		t.Fatal("bad offset accepted")
+	}
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	h.Handle(a, "/tz +8")
+	if _, off := time.Now().In(h.Loc(a)).Zone(); off != 8*3600 {
+		t.Fatal("tz not applied")
+	}
+}
+
+func TestIdleKick(t *testing.T) {
+	h := NewHub(Config{IdleKick: 20 * time.Millisecond})
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	time.Sleep(15 * time.Millisecond)
+	h.Handle(b, "/who") // b is active
+	time.Sleep(10 * time.Millisecond)
+	h.Janitor()
+	select {
+	case <-a.Done:
+	default:
+		t.Fatal("idle client not dropped")
+	}
+	select {
+	case <-b.Done:
+		t.Fatal("active client dropped")
+	default:
+	}
+}
+
+func TestStatsHasNoIdentities(t *testing.T) {
+	h := newTestHub()
+	h.Connect("ip-a", false)
+	st := h.Stats()
+	if st.Online != 1 || st.Rooms != 5 {
+		t.Fatalf("%+v", st)
+	}
+}

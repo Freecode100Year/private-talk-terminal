@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	mrand "math/rand/v2"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +62,8 @@ type Config struct {
 	MsgPerSecond  float64       // token refill rate
 	NickCooldown  time.Duration // between /nick changes
 	MaxPrivate    int           // private rooms alive at once
+	IdleKick      time.Duration // drop sessions that haven't sent anything for this long (0 = never)
+	Motd          []string      // extra lines shown on connect
 }
 
 func (c *Config) defaults() {
@@ -144,6 +148,9 @@ type Client struct {
 	nickAt      time.Time
 	createdAt   time.Time
 	reason      string
+	lastActive  time.Time
+	ignores     map[uint64]bool
+	loc         *time.Location
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -182,6 +189,7 @@ type Hub struct {
 	bans     map[string]time.Time
 	perIP    map[string]int
 	connLog  map[string][]time.Time
+	reports  []string
 	shutdown bool
 }
 
@@ -241,14 +249,17 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 
 	h.nextID++
 	c := &Client{
-		ID:        h.nextID,
-		out:       make(chan Event, 512),
-		done:      make(chan struct{}),
-		ipKey:     ipKey,
-		admin:     admin,
-		tokens:    h.cfg.MsgBurst,
-		tokensAt:  now,
-		createdAt: now,
+		ID:         h.nextID,
+		out:        make(chan Event, 256),
+		done:       make(chan struct{}),
+		ipKey:      ipKey,
+		admin:      admin,
+		tokens:     h.cfg.MsgBurst,
+		tokensAt:   now,
+		createdAt:  now,
+		lastActive: now,
+		ignores:    map[uint64]bool{},
+		loc:        time.Local,
 	}
 	c.Out, c.Done = c.out, c.done
 	c.nick = h.freeNickLocked()
@@ -261,6 +272,9 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 		"Type and press Enter to talk. /help lists all commands.",
 		"提醒：SSH 只加密传输，服务器能看到消息内容；不要发送真实身份信息。",
 	}})
+	if len(h.cfg.Motd) > 0 {
+		c.send(Event{Kind: KindNotice, Text: h.cfg.Motd[0], Lines: h.cfg.Motd[1:]})
+	}
 	h.joinLocked(c, h.public[0])
 	return c, nil
 }
@@ -318,6 +332,13 @@ func (h *Hub) Janitor() {
 			delete(h.bans, k)
 		}
 	}
+	if h.cfg.IdleKick > 0 {
+		for _, c := range h.clients {
+			if !c.admin && now.Sub(c.lastActive) > h.cfg.IdleKick {
+				h.removeLocked(c, fmt.Sprintf("idle for %s · 长时间未发言，已断开", h.cfg.IdleKick), "timed out")
+			}
+		}
+	}
 	for k, log := range h.connLog {
 		log = pruneTimes(log, now.Add(-time.Minute))
 		if len(log) == 0 {
@@ -340,6 +361,9 @@ func (h *Hub) Handle(c *Client, line string) Result {
 	if line == "" {
 		return Result{}
 	}
+	h.mu.Lock()
+	c.lastActive = time.Now()
+	h.mu.Unlock()
 	if strings.HasPrefix(line, "/") && !strings.HasPrefix(line, "//") {
 		return h.command(c, line)
 	}
@@ -400,10 +424,19 @@ func (h *Hub) command(c *Client, line string) Result {
 		h.whoLocked(c)
 	case "me":
 		h.sayLocked(c, rest, KindAction)
+	case "ignore", "block":
+		h.ignoreLocked(c, rest, true)
+	case "unignore", "unblock":
+		h.ignoreLocked(c, rest, false)
+	case "report":
+		target, reason, _ := strings.Cut(rest, " ")
+		h.reportLocked(c, strings.TrimPrefix(target, "@"), reason)
+	case "tz", "time":
+		h.tzLocked(c, rest)
 	case "whoami":
 		h.infof(c, "You are %s in %s.", c.nick, h.roomLabel(c.room))
 	// --- admin ---
-	case "kick", "mute", "unmute", "ban", "unbanall", "broadcast", "announce", "topic":
+	case "kick", "mute", "unmute", "ban", "unbanall", "broadcast", "announce", "topic", "reports":
 		if !c.admin {
 			h.errorf(c, "Unknown command /%s — try /help", cmd)
 			return Result{}
@@ -425,6 +458,9 @@ func (h *Hub) helpLocked(c *Client) {
 		"/nick <name>           修改昵称 · change nickname",
 		"/who                   当前房间在线用户 · who is here",
 		"/me <action>           动作消息 · action",
+		"/ignore <nick>         屏蔽某人（/unignore 取消）· hide someone",
+		"/report <nick> <why>   举报给管理员 · report to moderators",
+		"/tz <zone>             时区，如 /tz Asia/Shanghai 或 /tz +8 · timezone",
 		"/clear                 清屏 · clear screen",
 		"/quit                  退出 · disconnect",
 		"//text                 发送以 / 开头的文字 · send a literal '/'",
@@ -434,6 +470,7 @@ func (h *Hub) helpLocked(c *Client) {
 			"── admin ──",
 			"/kick <nick> [reason]  /mute <nick> [min]  /unmute <nick>",
 			"/ban <nick> [min]      /unbanall  /broadcast <text>  /topic <text>",
+			"/reports               最近的举报 · recent reports",
 		)
 	}
 	c.send(Event{Kind: KindInfo, Text: "Commands · 命令", Lines: lines})
@@ -556,7 +593,9 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 		r.history = append(r.history[:0:0], r.history[len(r.history)-h.cfg.HistorySize:]...)
 	}
 	for _, m := range r.members {
-		m.send(ev)
+		if !m.ignores[c.ID] {
+			m.send(ev)
+		}
 	}
 }
 
@@ -579,8 +618,10 @@ func (h *Hub) dmLocked(c *Client, target, text string) {
 		return
 	}
 	now := time.Now()
-	to.lastDMFrom = c.nick
-	to.send(Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
+	if !to.ignores[c.ID] { // ignored senders aren't told, so ignoring can't be probed
+		to.lastDMFrom = c.nick
+		to.send(Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
+	}
 	c.send(Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text})
 }
 
@@ -667,6 +708,13 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 		h.bans = map[string]time.Time{}
 		h.infof(c, "Cleared %d bans.", n)
 		return
+	case "reports":
+		if len(h.reports) == 0 {
+			h.infof(c, "No reports. 暂无举报。")
+			return
+		}
+		c.send(Event{Kind: KindInfo, Text: fmt.Sprintf("%d recent reports", len(h.reports)), Lines: append([]string(nil), h.reports...)})
+		return
 	case "topic":
 		r := h.rooms[c.room]
 		r.topic = Sanitize(rest, 80)
@@ -716,6 +764,126 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 		}
 		h.infof(c, "Banned %s's address for %d min.", arg, minutes)
 	}
+}
+
+func (h *Hub) ignoreLocked(c *Client, nick string, on bool) {
+	nick = strings.TrimPrefix(strings.TrimSpace(nick), "@")
+	if nick == "" {
+		var names []string
+		for id := range c.ignores {
+			if o := h.clients[id]; o != nil {
+				names = append(names, o.nick)
+			}
+		}
+		if len(names) == 0 {
+			h.infof(c, "You aren't ignoring anyone. Usage: /ignore <nick>")
+		} else {
+			sort.Strings(names)
+			h.infof(c, "Ignoring: %s", strings.Join(names, ", "))
+		}
+		return
+	}
+	t := h.byNick[strings.ToLower(nick)]
+	if t == nil {
+		h.errorf(c, "No user named %q online.", nick)
+		return
+	}
+	if t == c {
+		h.errorf(c, "You can't ignore yourself.")
+		return
+	}
+	if on {
+		c.ignores[t.ID] = true
+		h.infof(c, "Ignoring %s — you won't see their messages (until they reconnect). 已屏蔽。", t.nick)
+	} else {
+		delete(c.ignores, t.ID)
+		h.infof(c, "No longer ignoring %s. 已取消屏蔽。", t.nick)
+	}
+}
+
+func (h *Hub) reportLocked(c *Client, nick, reason string) {
+	reason = Sanitize(reason, 200)
+	t := h.byNick[strings.ToLower(nick)]
+	if nick == "" || t == nil {
+		h.errorf(c, "Usage: /report <nick> <reason> (user must be online)")
+		return
+	}
+	if !h.takeToken(c, 3) {
+		return
+	}
+	line := fmt.Sprintf("[%s] %s reported %s in %s: %s", time.Now().UTC().Format("01-02 15:04Z"), c.nick, t.nick, h.roomLabel(t.room), reason)
+	h.reports = append(h.reports, line)
+	if len(h.reports) > 50 {
+		h.reports = h.reports[len(h.reports)-50:]
+	}
+	admins := 0
+	for _, o := range h.clients {
+		if o.admin {
+			admins++
+			o.send(Event{Kind: KindNotice, Text: "Report · 举报", Lines: []string{line}})
+		}
+	}
+	if admins > 0 {
+		h.infof(c, "Report sent to %d moderator(s). 已通知管理员。", admins)
+	} else {
+		h.infof(c, "Report saved; no moderator is online right now. 已记录，管理员上线后可见。")
+	}
+}
+
+// ParseZone accepts IANA names (Asia/Shanghai), "utc"/"local", and
+// fixed offsets like +8, -5, +05:30.
+func ParseZone(s string) (*time.Location, error) {
+	s = strings.TrimSpace(s)
+	switch strings.ToLower(s) {
+	case "utc", "gmt", "z":
+		return time.UTC, nil
+	case "local", "server":
+		return time.Local, nil
+	}
+	if m := tzOffset.FindStringSubmatch(s); m != nil {
+		hours, _ := strconv.Atoi(m[2])
+		mins := 0
+		if m[3] != "" {
+			mins, _ = strconv.Atoi(m[3])
+		}
+		if hours > 14 || mins > 59 {
+			return nil, fmt.Errorf("offset out of range")
+		}
+		sign := m[1]
+		if sign == "" {
+			sign = "+"
+		}
+		off := hours*3600 + mins*60
+		if sign == "-" {
+			off = -off
+		}
+		name := fmt.Sprintf("UTC%s%d", sign, hours)
+		if mins > 0 {
+			name += fmt.Sprintf(":%02d", mins)
+		}
+		return time.FixedZone(name, off), nil
+	}
+	if strings.Contains(s, "..") || len(s) > 40 {
+		return nil, fmt.Errorf("bad zone")
+	}
+	return time.LoadLocation(s)
+}
+
+var tzOffset = regexp.MustCompile(`^(?:UTC|GMT)?([+-]?)(\d{1,2})(?::?(\d{2}))?$`)
+
+func (h *Hub) tzLocked(c *Client, arg string) {
+	if strings.TrimSpace(arg) == "" {
+		h.infof(c, "Times are shown in %s (now %s). Usage: /tz Asia/Shanghai | /tz America/New_York | /tz +8 | /tz utc",
+			c.loc.String(), time.Now().In(c.loc).Format("15:04"))
+		return
+	}
+	loc, err := ParseZone(arg)
+	if err != nil {
+		h.errorf(c, "Unknown timezone %q. 例如 /tz Asia/Shanghai 或 /tz +8", Sanitize(arg, 40))
+		return
+	}
+	c.loc = loc
+	h.infof(c, "Timezone set to %s — now %s. 时区已设置。", loc.String(), time.Now().In(loc).Format("15:04"))
 }
 
 // --- abuse protection -------------------------------------------------------
@@ -857,6 +1025,7 @@ type Status struct {
 	Uptime    time.Duration
 	Admin     bool
 	Muted     bool
+	Loc       *time.Location
 }
 
 // Status returns the current view of the world for client c.
@@ -870,6 +1039,7 @@ func (h *Hub) Status(c *Client) Status {
 		Uptime: time.Since(h.started),
 		Admin:  c.admin,
 		Muted:  !c.mutedUntil.IsZero() && time.Now().Before(c.mutedUntil),
+		Loc:    c.loc,
 	}
 	s.RoomLabel = h.roomLabel(c.room)
 	if r := h.rooms[c.room]; r != nil {
@@ -895,6 +1065,13 @@ func (h *Hub) Nick(c *Client) string {
 	return c.nick
 }
 
+// Loc returns the client's display timezone.
+func (h *Hub) Loc(c *Client) *time.Location {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return c.loc
+}
+
 // Nicks returns online nicknames, for tab completion.
 func (h *Hub) Nicks() []string {
 	h.mu.Lock()
@@ -904,4 +1081,27 @@ func (h *Hub) Nicks() []string {
 		out = append(out, c.nick)
 	}
 	return out
+}
+
+// Stats is a privacy-safe summary for health checks.
+type Stats struct {
+	Online       int   `json:"online"`
+	Rooms        int   `json:"rooms"`
+	PrivateRooms int   `json:"private_rooms"`
+	UptimeSec    int64 `json:"uptime_seconds"`
+}
+
+// Stats returns counts only — no nicknames, addresses or messages.
+func (h *Hub) Stats() Stats {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	st := Stats{Online: len(h.clients), UptimeSec: int64(time.Since(h.started).Seconds())}
+	for _, r := range h.rooms {
+		if r.private {
+			st.PrivateRooms++
+		} else {
+			st.Rooms++
+		}
+	}
+	return st
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -28,10 +29,8 @@ import (
 	"sync"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/ssh"
 	"charm.land/wish/v2"
-	"charm.land/wish/v2/bubbletea"
 	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
@@ -96,8 +95,7 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 		}),
 		wish.WithPasswordAuth(func(ssh.Context, string) bool { return true }),
 		wish.WithMiddleware(
-			bubbletea.Middleware(s.teaHandler), // innermost
-			s.plainMiddleware,
+			s.uiHandler,         // innermost: full-screen or plain UI
 			s.sessionMiddleware, // outermost, runs first
 		),
 	}
@@ -247,29 +245,44 @@ func wantsPlain(sess ssh.Session) (plain bool, hasPty bool, width int) {
 	return false, true, pty.Window.Width
 }
 
-func (s *Server) plainMiddleware(next ssh.Handler) ssh.Handler {
+func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 	return func(sess ssh.Session) {
-		plain, hasPty, width := wantsPlain(sess)
-		if !plain {
-			next(sess)
-			return
-		}
 		c := clientFrom(sess)
 		if c == nil {
 			return
 		}
-		ui.Plain(sess, s.hub, c, hasPty, width)
+		plain, hasPty, width := wantsPlain(sess)
+		if plain {
+			ui.Plain(sess, s.hub, c, hasPty, width)
+			_ = sess.Exit(0)
+			return
+		}
+		pty, winCh, _ := sess.Pty()
+		resize := make(chan ui.WindowSize, 1)
+		go func() {
+			for {
+				select {
+				case w, ok := <-winCh:
+					if !ok {
+						return
+					}
+					select { // keep only the latest size
+					case <-resize:
+					default:
+					}
+					resize <- ui.WindowSize{Width: w.Width, Height: w.Height}
+				case <-sess.Context().Done():
+					return
+				}
+			}
+		}()
+		msg := ui.RunTerm(sess, s.hub, c, pty.Window.Width, pty.Window.Height, resize)
+		if msg != "" {
+			_, _ = io.WriteString(sess, msg+"\r\n")
+		}
 		_ = sess.Exit(0)
+		next(sess)
 	}
-}
-
-func (s *Server) teaHandler(sess ssh.Session) (tea.Model, []tea.ProgramOption) {
-	c := clientFrom(sess)
-	if c == nil {
-		return nil, nil
-	}
-	pty, _, _ := sess.Pty()
-	return ui.NewTUI(s.hub, c, pty.Window.Width, pty.Window.Height), nil
 }
 
 // Run serves until ctx is cancelled, then shuts down gracefully.

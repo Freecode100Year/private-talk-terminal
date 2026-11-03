@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Verify modules against the Go checksum database
+        run: |
+          go mod download
+          go mod verify
+          go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Cross-compile
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /dev/null .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /dev/null .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -o /dev/null .
+
+      - name: Shellcheck installer
+        run: shellcheck -S warning install.sh
+
+      - name: Unit file in sync with installer
+        run: bash install.sh --print-unit | diff -u deploy/ptterm.service -
+
+  installer:
+    # Real end-to-end run of install.sh on a systemd machine, using a local
+    # "release" built from this commit.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build local release
+        run: |
+          mkdir -p /tmp/rel
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=ci-${GITHUB_SHA::7}" -o /tmp/rel/ptterm-linux-amd64 .
+          (cd /tmp/rel && sha256sum ptterm-linux-* > SHA256SUMS)
+          (cd /tmp/rel && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          sleep 1
+
+      - name: Install
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/ptt_admin
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 bash install.sh --admin-key ~/.ssh/ptt_admin.pub --domain localhost
+
+      - name: Chat over SSH
+        run: |
+          out=$( (sleep 2; echo "/nick ci-bot"; sleep 0.5; echo "hello from CI"; sleep 0.5; echo "/quit") \
+            | ssh -T -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no guest@127.0.0.1 )
+          echo "$out"
+          echo "$out" | grep -q "<ci-bot> hello from CI"
+
+      - name: Exec is refused
+        run: |
+          out=$(ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no guest@127.0.0.1 id 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "only offers the chat room"
+
+      - name: Status, reinstall, uninstall
+        run: |
+          sudo ptterm-ctl status
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --port 2299
+          ss -ltn | grep -q ':2299 '
+          sudo ptterm-ctl uninstall --purge
+          if systemctl is-active --quiet ptterm; then echo "still running"; exit 1; fi
+          test ! -e /usr/local/bin/ptterm

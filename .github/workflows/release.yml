@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: |
+          go mod verify
+          go test -count=1 ./...
+
+      - name: Build
+        run: |
+          set -e
+          V="${GITHUB_REF_NAME}"
+          FLAGS="-trimpath -ldflags=-s -ldflags=-w -ldflags=-X=main.version=${V}"
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64        go build $FLAGS -o dist/ptterm-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64        go build $FLAGS -o dist/ptterm-linux-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7  go build $FLAGS -o dist/ptterm-linux-armv7 .
+          cp install.sh dist/
+          (cd dist && sha256sum ptterm-linux-* install.sh > SHA256SUMS && cat SHA256SUMS)
+          ./dist/ptterm-linux-amd64 -version
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## 一键安装 · One-line install
+
+          ```bash
+          curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-terminal/main/install.sh | sudo bash
+          ```
+
+          已安装的服务器升级 · Upgrade an existing server: `sudo ptterm-ctl upgrade`
+
+          Binaries: `ptterm-linux-amd64` (x86_64), `ptterm-linux-arm64` (ARM64 e.g. Oracle Ampere), `ptterm-linux-armv7`. Verify with `SHA256SUMS`.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes
