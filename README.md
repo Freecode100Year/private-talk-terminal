@@ -96,8 +96,17 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 | 最大匿名（不向服务器出示公钥） | `ssh -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no -p 2222 guest@HOST` |
 
 - 用户名随便填，没有密码；客户端问密码就直接回车。
-- 首次连接会自动记录服务器主机密钥，不再询问 `yes`；之后若密钥变化，SSH 会拒绝连接并提示风险。
+- 使用上面的 `accept-new` 选项后，首次连接会自动记录服务器主机密钥；之后若密钥变化，SSH 会拒绝连接并提示风险。
 - Windows 10/11 自带 OpenSSH；中文显示推荐 Windows Terminal。老 CMD 乱码时用 `plain@`，或先执行 `chcp 65001`。
+
+如果希望命令中不写 `-o StrictHostKeyChecking=accept-new`，在 SSH 配置文件中为该域名设置一次：Windows 文件为 `%USERPROFILE%\.ssh\config`，macOS/Linux 文件为 `~/.ssh/config`。把下面内容加到文件靠前位置：
+
+```sshconfig
+Host term.freedom8964.com
+    StrictHostKeyChecking accept-new
+```
+
+之后可直接运行 `ssh -p 2222 guest@term.freedom8964.com`。首次自动保存密钥，后续仍会拒绝密钥变化。
 
 ### 命令
 
