@@ -42,7 +42,6 @@ func main() {
 		torExits    = flag.Bool("tor-exits", envOr("PTT_TOR_EXITS", "on") != "off", "fetch Tor's public exit list so Tor Browser users share the generous Tor limits instead of being capped per address")
 		lang        = flag.String("lang", envOr("PTT_LANG", "zh"), "interface language for clients that send no LANG: zh or en (env PTT_LANG)")
 		quietAbove  = flag.Int("quiet-above", 20, "rooms with more members than this show a join/leave summary every 30s instead of every line (-1 = never)")
-		secureURL   = flag.String("secure-url", envOr("PTT_SECURE_URL", "https://hr50.freedom8964.com/"), "HTML Room creator that /secure points to (end-to-end encrypted rooms)")
 		banFile     = flag.String("ban-file", envOr("PTT_BAN_FILE", ""), "persist bans across restarts in this file (opt-in; see README for the privacy trade-off)")
 		onionAddr   = flag.String("onion-addr", envOr("PTT_ONION_ADDR", ""), "extra listener for a Tor onion service, e.g. 127.0.0.1:2224 (Tor users share one rate-limit bucket)")
 		msgRate     = flag.Float64("msg-rate", 1, "messages per second allowed (sustained)")
@@ -101,7 +100,6 @@ func main() {
 		PersistBans:   *banFile != "",
 		TorEnabled:    *onionAddr != "",
 		TorExits:      *torExits,
-		SecureURL:     *secureURL,
 		QuietAbove:    *quietAbove,
 		Lang:          *lang,
 	})

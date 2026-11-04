@@ -562,7 +562,7 @@ func TestHelpIsShortByDefault(t *testing.T) {
 	}
 	h.Handle(a, "/help all")
 	all := strings.Join(drain(a)[0].Lines, "\n")
-	for _, cmd := range []string{"/secure", "/forget", "/privacy", "/ignore", "/create", "/tz"} {
+	for _, cmd := range []string{"/forget", "/privacy", "/ignore", "/create", "/tz"} {
 		if !strings.Contains(all, cmd) {
 			t.Errorf("/help all missing %s", cmd)
 		}
@@ -644,7 +644,7 @@ func TestLanguage(t *testing.T) {
 	}
 	// every server message to a client carries both languages
 	drain(a)
-	for _, cmd := range []string{"/help", "/help all", "/rooms", "/who", "/privacy", "/secure", "/bell", "/tz", "/join nope", "/nick x", "/frobnicate"} {
+	for _, cmd := range []string{"/help", "/help all", "/rooms", "/who", "/privacy", "/bell", "/tz", "/join nope", "/nick x", "/frobnicate"} {
 		h.Handle(a, cmd)
 		for _, ev := range drain(a) {
 			if ev.Kind != KindChat && ev.Kind != KindAction && ev.En == "" {

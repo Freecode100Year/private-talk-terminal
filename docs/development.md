@@ -34,7 +34,6 @@ deploy/                     systemd 单元（由 install.sh --print-unit 生成�
 - [x] `/privacy` 数据政策自查、`/forget` 删除自己的消息、禁止核心转储
 - [x] 封禁持久化（可选）、`/bans` 与 `/unban`
 - [x] 多房间未读提示、跨房间 @提及通知
-- [x] 端到端加密房间：`/secure` 转到 HTML Room（钥匙只在用户浏览器里生成），拦截不带口令的邀请链接，`/link` 显示完整链接
 - [x] 响铃、人多时折叠进出提示、备用 443 端口、主机指纹文档、Tor 出口共用限额
 - [x] 按客户端语言只显示一种语言（`LANG`、`en@` 登录、`/lang`）
 - [x] `ptterm-ctl doctor` 自检

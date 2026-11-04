@@ -40,12 +40,6 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 	for {
 		select {
 		case ev := <-c.Out:
-			if ev.Invite != nil {
-				p.invites = append(p.invites, ev)
-				if len(p.invites) > 50 {
-					p.invites = p.invites[1:]
-				}
-			}
 			p.printEvent(*ev)
 			if Rings(ev, hub.Nick(c)) && hub.BellOn(c) && time.Since(p.rang) > 2*time.Second {
 				p.write("\a")
@@ -59,15 +53,6 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 		case <-quit:
 			return
 		case line := <-lines:
-			if cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " "); strings.EqualFold(cmd, "/link") {
-				if inv := findInvite(p.invites, arg); inv != nil {
-					p.printRaw(inv.URL)
-				} else {
-					p.printRaw(p.fmt.tr("没有找到加密房间邀请。用法：/link 或 /link <编号>", "No encrypted-room invite found. Usage: /link or /link <number>"))
-				}
-				p.drawPrompt()
-				continue
-			}
 			res := hub.Handle(c, line)
 			if res.Quit {
 				p.printRaw(p.fmt.tr("再见！", "Bye!"))
@@ -79,17 +64,16 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 }
 
 type plain struct {
-	mu      sync.Mutex
-	w       io.Writer
-	hub     *chat.Hub
-	c       *chat.Client
-	fmt     Formatter
-	pty     bool
-	nl      string
-	width   int
-	buf     []rune        // current input (pty mode only)
-	invites []*chat.Event // recent events carrying invites, for /link
-	rang    time.Time     // last bell, to rate-limit it
+	mu    sync.Mutex
+	w     io.Writer
+	hub   *chat.Hub
+	c     *chat.Client
+	fmt   Formatter
+	pty   bool
+	nl    string
+	width int
+	buf   []rune    // current input (pty mode only)
+	rang  time.Time // last bell, to rate-limit it
 }
 
 func (p *plain) write(s string) {
@@ -196,7 +180,7 @@ func (p *plain) readInput(r io.Reader, lines chan<- string, quit chan<- struct{}
 			// ignore other control keys
 		default:
 			p.mu.Lock()
-			if len(p.buf) < chat.MaxInviteRunes {
+			if len(p.buf) < p.hub.Config().MaxMsgRunes+64 {
 				p.buf = append(p.buf, ru)
 				p.write(string(ru))
 			}

@@ -97,7 +97,6 @@ type Term struct {
 	histPos int
 	draft   string
 
-	page   bool           // a full-screen page (/link) is shown; chat drawing paused
 	last   map[int]string // last content drawn on fixed rows, to skip no-op redraws
 	curCol int            // cursor column on the input row (cached; recomputed on input change)
 	rang   time.Time      // last bell, to rate-limit it
@@ -198,7 +197,7 @@ func (t *Term) flush() {
 
 // --- geometry ---------------------------------------------------------------
 
-func (t *Term) tooSmall() bool { return t.page || t.width < minWidth || t.height < minHeight }
+func (t *Term) tooSmall() bool { return t.width < minWidth || t.height < minHeight }
 func (t *Term) chatTop() int   { return 3 }
 func (t *Term) chatBot() int   { return t.height - 3 }
 func (t *Term) bodyH() int     { return max(1, t.chatBot()-t.chatTop()+1) }
@@ -507,11 +506,6 @@ func (t *Term) placeCursor() {
 // --- input --------------------------------------------------------------------
 
 func (t *Term) handleKey(k key) (quit bool) {
-	if t.page { // any key closes the /link page
-		t.page = false
-		t.fullRedraw()
-		return k.kind == kCtrlC
-	}
 	switch k.kind {
 	case kCtrlC:
 		return true
@@ -589,7 +583,7 @@ func (t *Term) handleKey(k key) (quit bool) {
 }
 
 func (t *Term) insert(s string) {
-	limit := chat.MaxInviteRunes // room for a pasted invite link
+	limit := t.hub.Config().MaxMsgRunes + 64
 	var rs []rune
 	for _, r := range s {
 		if chat.Printable(r) {
@@ -625,10 +619,6 @@ func (t *Term) submit() bool {
 	t.histPos, t.draft = len(t.hist), ""
 	if t.scroll > 0 {
 		t.scrollBy(-t.scroll)
-	}
-	if cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " "); strings.EqualFold(cmd, "/link") {
-		t.showLink(arg)
-		return false
 	}
 	res := t.hub.Handle(t.c, line)
 	if res.Quit {
@@ -885,42 +875,4 @@ func readPaste(br *bufio.Reader) key {
 		}
 	}
 	return key{kind: kPaste, text: string(buf)}
-}
-
-// findInvite returns invite number n (or the newest one when arg is empty)
-// among the events this session has received.
-func findInvite(events []*chat.Event, arg string) *chat.Invite {
-	arg = strings.TrimPrefix(strings.TrimSpace(arg), "#")
-	for i := len(events) - 1; i >= 0; i-- {
-		if inv := events[i].Invite; inv != nil && (arg == "" || fmt.Sprint(inv.N) == arg) {
-			return inv
-		}
-	}
-	return nil
-}
-
-// showLink shows one invite's full URL on a page of its own: no scroll
-// region and no wrapping by us, so the terminal soft-wraps it and copying
-// (or tapping, on phones) gets the whole link.
-func (t *Term) showLink(arg string) {
-	inv := findInvite(t.events, arg)
-	if inv == nil {
-		t.addEvent(&chat.Event{Time: time.Now(), Kind: chat.KindError, Text: "没有找到加密房间邀请。用法：/link 或 /link <编号>", En: "No encrypted-room invite found. Usage: /link or /link <number>"})
-		t.drawInput()
-		return
-	}
-	t.page = true
-	t.out.WriteString("\x1b[r\x1b[0m\x1b[H\x1b[2J")
-	title := inv.Title
-	if title == "" {
-		title = t.fmt.tr("加密房间", "encrypted room")
-	}
-	fmt.Fprintf(&t.out, "%s\r\n\r\n", sBold.R(fmt.Sprintf(t.fmt.tr("🔐 邀请 #%d「%s」· %s", "🔐 Invite #%d “%s” · %s"), inv.N, title, inv.Host)))
-	if !inv.Trusted {
-		fmt.Fprintf(&t.out, "%s\r\n\r\n", sError.R(t.fmt.tr("⚠ 这个链接不在本服务器默认的 HTML Room 站点上，打开前请确认来源。", "⚠ This link is not on this server's default HTML Room site — check where it came from before opening.")))
-	}
-	t.out.WriteString(inv.URL)
-	t.out.WriteString("\r\n\r\n")
-	t.out.WriteString(sDim.R(t.fmt.tr("复制或点开上面的链接，在浏览器里打开；口令请向发送者另行索取，进房后核对安全码。", "Copy or open the link above in a browser; ask the sender for the passphrase another way, and compare the safety code in the room.")) + "\r\n\r\n")
-	t.out.WriteString(sPrompt.R(t.fmt.tr("按任意键返回聊天", "Press any key to go back")))
 }

@@ -104,8 +104,6 @@ iSH Shell 是一个在 iOS 上模拟 Linux 环境的免费应用，可以像在�
 /lang zh|en            界面语言（只显示一种语言）
 /bell on|off           被 @ 或收到私聊时响铃
 /tz <zone>             按你的时区显示时间：/tz Asia/Shanghai、/tz +8、/tz utc
-/secure                创建端到端加密房间（连服务器都看不到内容），见下文
-/link [N]              显示第 N 个加密房间邀请的完整链接（方便复制、点开）
 /privacy               查看本服务器存什么、不存什么
 /forget                从服务器房间历史中删除你发过的所有消息
 /clear  /quit  /help

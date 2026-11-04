@@ -48,7 +48,6 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 
 - 没有账号；你的 SSH 公钥不会发给服务器；日志里没有 IP、昵称和聊天内容；消息只在内存里，过期自动删除。
 - **服务器能看到聊天内容**，别发能认出你的信息。在聊天室里输入 `/privacy` 可以查看这台服务器存什么、不存什么，`/forget` 删除你发过的消息。
-- 需要连服务器都看不到的对话：输入 `/secure`，转到端到端加密房间。
 - 想连 IP 也不让服务器看到：通过 Tor 连接（需要部署者开启）。
 
 详细说明见[安全与匿名性](docs/security.md)。
@@ -83,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 ## 文档
 
 - [连接与使用](docs/usage.md)：各平台连接方法、iPhone 详细步骤、全部命令、Tor
-- [安全与匿名性](docs/security.md)：部署者能看到什么、端到端加密房间
+- [安全与匿名性](docs/security.md)：部署者能看到什么、不能保证什么
 - [部署与配置](docs/deploy.md)：一键安装参数、管理员、配置项
 - [性能](docs/performance.md)：压测数据和设计
 - [开发](docs/development.md)：构建、测试、发布、代码结构、路线图

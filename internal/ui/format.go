@@ -141,9 +141,6 @@ func (f Formatter) lines(ev chat.Event) []string {
 	}
 
 	text := ev.Text
-	if inv := ev.Invite; inv != nil {
-		text = f.inviteText(text, inv)
-	}
 	if (ev.Kind == chat.KindChat || ev.Kind == chat.KindAction) && ev.From != self && Mentions(text, self) {
 		if f.Styled {
 			text = sMention.R(text)
@@ -231,28 +228,6 @@ func isWordByte(s string, i int) bool {
 	}
 	c := s[i]
 	return c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z'
-}
-
-// inviteText replaces a long HTML Room URL with a short clickable label
-// (OSC 8 hyperlink) so terminal line-wrapping can't break it. Terminals
-// without OSC 8 show the label; /link prints the raw URL for copying.
-// Plain mode keeps the raw URL, which plain terminals can select.
-func (f Formatter) inviteText(text string, inv *chat.Invite) string {
-	title := inv.Title
-	if title == "" {
-		title = f.tr("加密房间", "encrypted room")
-	}
-	where := inv.Host
-	if !inv.Trusted {
-		where = f.tr("⚠ 非默认站点 ", "⚠ not the default site ") + inv.Host
-	}
-	note := fmt.Sprintf(f.tr("（需口令 · /link %d）", " (passphrase needed · /link %d)"), inv.N)
-	if !f.Styled {
-		return strings.Replace(text, inv.URL, fmt.Sprintf("🔐 [%s · %s] %s %s", title, where, inv.URL, note), 1)
-	}
-	label := fmt.Sprintf(f.tr("🔐 打开「%s」· %s", "🔐 open “%s” · %s"), title, where)
-	link := "\x1b]8;;" + inv.URL + "\x1b\\" + sNotice.R(label) + "\x1b]8;;\x1b\\"
-	return strings.Replace(text, inv.URL, link+sDim.R(note), 1)
 }
 
 // Rings reports whether an event should sound the terminal bell for the
