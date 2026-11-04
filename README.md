@@ -65,6 +65,19 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 
 单核 1GB 的 VPS 大约能承载 2000 人同时在线。安装参数、管理员、配置项见[部署与配置](docs/deploy.md)。
 
+## 计划
+
+参考同类项目（ssh-chat、devzat、SoftRoom、sshoosh、SSHChat）后定下的改进，按顺序进行。原则：不增加新用户要学的东西，不削弱匿名。
+
+- [ ] **被 @、收到私聊时响铃**：默认开启，`/bell off` 关闭（借鉴 devzat）
+- [ ] **人多时折叠进出提示**：合并成“3 人进入、2 人离开”（借鉴 ssh-chat `/quiet`）
+- [ ] **备用 443 端口**：安装时加 `--alt-port 443`，给被防火墙拦住的用户一条路（借鉴 devzat）
+- [ ] **核对主机指纹、`ssh chat` 短命令**：写进文档，`ptterm-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
+- [ ] **Tor 出口 IP 共用宽松限额**：避免误伤用 Tor 浏览器直连的人（反向借鉴 devzat，它拒绝 Tor 用户）
+- [ ] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
+- [ ] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
+- [ ] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
+
 ## 文档
 
 - [连接与使用](docs/usage.md)：各平台连接方法、iPhone 详细步骤、全部命令、Tor
