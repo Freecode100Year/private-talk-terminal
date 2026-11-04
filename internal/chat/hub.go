@@ -689,9 +689,35 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	if r.private {
 		topic, topicEn = "私人房间", "private room"
 	}
-	c.send(&Event{Kind: KindInfo, Room: name,
+	ev := &Event{Kind: KindInfo, Room: name,
 		Text: fmt.Sprintf("已进入 %s · %s · %d 人", h.roomLabel(name), topic, len(r.members)),
-		En:   fmt.Sprintf("Now in %s · %s · %d here", h.roomLabel(name), topicEn, len(r.members))})
+		En:   fmt.Sprintf("Now in %s · %s · %d here", h.roomLabel(name), topicEn, len(r.members))}
+	// An empty screen looks like something went wrong: say what's going on.
+	switch {
+	case len(r.members) == 1 && !r.private:
+		ev.Lines = []string{h.othersHint(name)}
+	case len(r.history) == 0:
+		ev.Lines = []string{bi("这里还没有消息，说第一句吧", "no messages yet — say something")}
+	}
+	c.send(ev)
+}
+
+// othersHint tells someone alone in a public room where people are.
+func (h *Hub) othersHint(here string) string {
+	best, n := "", 0
+	for _, name := range h.public {
+		if r := h.rooms[name]; name != here && len(r.members) > n {
+			best, n = name, len(r.members)
+		}
+	}
+	if best == "" {
+		if len(h.clients) > 1 {
+			return bi("这里暂时只有你，有人进来会显示在这里", "only you here for now; arrivals show up here")
+		}
+		return bi("暂时只有你在线，有人进来会显示在这里", "you're the only one online for now; arrivals show up here")
+	}
+	return bi(fmt.Sprintf("这里暂时只有你；#%s 有 %d 人，/join %s", best, n, best),
+		fmt.Sprintf("only you here; #%s has %d — /join %s", best, n, best))
 }
 
 func (h *Hub) gcRoomLocked(r *room) {

@@ -635,3 +635,38 @@ func TestBilingual(t *testing.T) {
 		}
 	}
 }
+
+func TestJoinHints(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("a", false)
+	evs := drain(a)
+	if !hasLine(evs, "只有你在线") {
+		t.Fatalf("lone user gets no hint: %+v", evs)
+	}
+	b, _ := h.Connect("b", false)
+	h.Handle(b, "/join english")
+	if evs := drain(b); !hasLine(evs, "#general 有 1 人") {
+		t.Fatalf("no pointer to the busy room: %+v", evs)
+	}
+	h.Handle(b, "/join general") // a is there, nobody has posted
+	if evs := drain(b); !hasLine(evs, "还没有消息") {
+		t.Fatalf("empty room without hint: %+v", evs)
+	}
+	h.Handle(a, "/create")
+	drain(a)
+	h.Handle(b, "/join english")
+	if evs := drain(b); !hasLine(evs, "这里暂时只有你") {
+		t.Fatalf("hint while others are in private rooms: %+v", evs)
+	}
+}
+
+func hasLine(evs []Event, sub string) bool {
+	for _, e := range evs {
+		for _, l := range e.Lines {
+			if strings.Contains(l, sub) {
+				return true
+			}
+		}
+	}
+	return false
+}
