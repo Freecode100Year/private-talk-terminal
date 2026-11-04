@@ -47,6 +47,10 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 				}
 			}
 			p.printEvent(*ev)
+			if Rings(ev, hub.Nick(c)) && hub.BellOn(c) && time.Since(p.rang) > 2*time.Second {
+				p.write("\a")
+				p.rang = time.Now()
+			}
 		case <-c.Done:
 			if r := c.Reason(); r != "" {
 				p.printRaw("Disconnected: " + r)
@@ -85,6 +89,7 @@ type plain struct {
 	width   int
 	buf     []rune        // current input (pty mode only)
 	invites []*chat.Event // recent events carrying invites, for /link
+	rang    time.Time     // last bell, to rate-limit it
 }
 
 func (p *plain) write(s string) {

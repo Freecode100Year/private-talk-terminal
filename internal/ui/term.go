@@ -100,6 +100,7 @@ type Term struct {
 	page   bool           // a full-screen page (/link) is shown; chat drawing paused
 	last   map[int]string // last content drawn on fixed rows, to skip no-op redraws
 	curCol int            // cursor column on the input row (cached; recomputed on input change)
+	rang   time.Time      // last bell, to rate-limit it
 	out    bytes.Buffer
 }
 
@@ -136,10 +137,12 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 			// Plain chat lines don't change the header/rooms/separator, so
 			// only refresh status (which takes the hub lock) for other events.
 			stale := t.addEvent(ev)
+			ring := Rings(ev, t.status.Nick)
 			for drained := 0; drained < 512; drained++ {
 				select {
 				case ev := <-c.Out:
 					stale = t.addEvent(ev) || stale
+					ring = ring || Rings(ev, t.status.Nick)
 					continue
 				default:
 				}
@@ -147,6 +150,10 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 			}
 			if stale {
 				t.refreshStatus()
+			}
+			if ring && t.status.Bell && time.Since(t.rang) > 2*time.Second {
+				t.out.WriteString("\a")
+				t.rang = time.Now()
 			}
 			t.flush()
 		case k := <-keys:

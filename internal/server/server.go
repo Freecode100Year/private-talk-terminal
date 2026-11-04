@@ -370,6 +370,18 @@ func (s *Server) Run(ctx context.Context) error {
 		<-persistDone // final save before exit
 	}()
 	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.hub.FlushPresence()
+			}
+		}
+	}()
+	go func() {
 		t := time.NewTicker(time.Minute)
 		defer t.Stop()
 		for {

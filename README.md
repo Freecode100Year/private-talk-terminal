@@ -69,8 +69,8 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 
 参考同类项目（ssh-chat、devzat、SoftRoom、sshoosh、SSHChat）后定下的改进，按顺序进行。原则：不增加新用户要学的东西，不削弱匿名。
 
-- [ ] **被 @、收到私聊时响铃**：默认开启，`/bell off` 关闭（借鉴 devzat）
-- [ ] **人多时折叠进出提示**：合并成“3 人进入、2 人离开”（借鉴 ssh-chat `/quiet`）
+- [x] **被 @、收到私聊时响铃**：默认开启，`/bell off` 关闭（借鉴 devzat）
+- [x] **人多时折叠进出提示**：合并成“3 人进入、2 人离开”（借鉴 ssh-chat `/quiet`）
 - [ ] **备用 443 端口**：安装时加 `--alt-port 443`，给被防火墙拦住的用户一条路（借鉴 devzat）
 - [ ] **核对主机指纹、`ssh chat` 短命令**：写进文档，`ptterm-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
 - [ ] **Tor 出口 IP 共用宽松限额**：避免误伤用 Tor 浏览器直连的人（反向借鉴 devzat，它拒绝 Tor 用户）

@@ -571,3 +571,45 @@ func TestHelpIsShortByDefault(t *testing.T) {
 		t.Error("admin commands shown to a non-admin")
 	}
 }
+
+func TestPresenceSummaryCounts(t *testing.T) {
+	h := NewHub(Config{QuietAbove: 1})
+	a, _ := h.Connect("a", false)
+	h.Connect("b", false) // a alone -> announced
+	drain(a)
+	c, _ := h.Connect("c", false)
+	h.Connect("d", false)
+	h.Disconnect(c)
+	h.FlushPresence()
+	if !has(drain(a), KindSystem, "2 人进入、1 人离开") {
+		t.Fatal("summary should count 2 joins and 1 leave")
+	}
+}
+
+func TestModerationNeverCollapsed(t *testing.T) {
+	h := NewHub(Config{QuietAbove: 1})
+	adm, _ := h.Connect("adm", true)
+	h.Connect("x", false)
+	v, _ := h.Connect("v", false)
+	drain(adm)
+	h.Handle(adm, "/kick "+h.Nick(v))
+	if !has(drain(adm), KindSystem, "was kicked") {
+		t.Fatal("kicks must stay visible even in busy rooms")
+	}
+}
+
+func TestBellToggle(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("a", false)
+	if !h.BellOn(a) || !h.Status(a).Bell {
+		t.Fatal("bell should default to on")
+	}
+	h.Handle(a, "/bell off")
+	if h.BellOn(a) {
+		t.Fatal("/bell off ignored")
+	}
+	h.Handle(a, "/bell on")
+	if !h.BellOn(a) {
+		t.Fatal("/bell on ignored")
+	}
+}

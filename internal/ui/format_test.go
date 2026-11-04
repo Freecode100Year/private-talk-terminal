@@ -51,3 +51,24 @@ func TestInviteRendering(t *testing.T) {
 		t.Fatal("untrusted host not flagged")
 	}
 }
+
+func TestRings(t *testing.T) {
+	cases := []struct {
+		ev   chat.Event
+		want bool
+	}{
+		{chat.Event{Kind: chat.KindDMIn, From: "x", Text: "hi"}, true},
+		{chat.Event{Kind: chat.KindMention, From: "x", Text: "@me"}, true},
+		{chat.Event{Kind: chat.KindChat, From: "x", Text: "hey me!"}, true},
+		{chat.Event{Kind: chat.KindChat, From: "x", Text: "hello all"}, false},
+		{chat.Event{Kind: chat.KindChat, From: "me", Text: "me talking"}, false},
+		{chat.Event{Kind: chat.KindChat, From: "x", Text: "hey me", History: true}, false},
+		{chat.Event{Kind: chat.KindSystem, Text: "me joined."}, false},
+	}
+	for i, c := range cases {
+		ev := c.ev
+		if got := Rings(&ev, "me"); got != c.want {
+			t.Errorf("case %d: Rings=%v want %v", i, got, c.want)
+		}
+	}
+}

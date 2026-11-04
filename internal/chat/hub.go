@@ -79,6 +79,10 @@ type Config struct {
 	// SecureURL is the HTML Room creator /secure points to; invites to other
 	// hosts are shown with a warning.
 	SecureURL string
+	// QuietAbove: in rooms with more members than this, individual
+	// join/leave lines are replaced by a periodic summary (FlushPresence).
+	// 0 = default (20); negative = never collapse.
+	QuietAbove int
 }
 
 func (c *Config) defaults() {
@@ -121,6 +125,9 @@ func (c *Config) defaults() {
 	if c.MaxPrivate <= 0 {
 		c.MaxPrivate = 500
 	}
+	if c.QuietAbove == 0 {
+		c.QuietAbove = 20
+	}
 	if c.SecureURL == "" {
 		c.SecureURL = "https://hr50.freedom8964.com/"
 	}
@@ -150,6 +157,8 @@ type room struct {
 	members map[uint64]*Client
 	history []Event
 	seq     uint64 // chat/action messages ever posted, for unread counts
+	joins   int    // collapsed presence since the last FlushPresence
+	leaves  int
 }
 
 // Client is one connected session.
@@ -182,6 +191,7 @@ type Client struct {
 	loc         *time.Location
 	seen        map[string]uint64 // room -> room.seq when the client last left/joined it
 	mentioned   map[string]bool   // rooms where the client was @mentioned while away
+	noBell      bool              // /bell off
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -336,7 +346,7 @@ func (h *Hub) removeLocked(c *Client, reason, verb string) {
 	}
 	if r := h.rooms[c.room]; r != nil {
 		delete(r.members, c.ID)
-		h.roomSystemLocked(r, fmt.Sprintf("%s %s.", c.nick, verb))
+		h.presenceLocked(r, c.nick, verb, verb == "left" || verb == "timed out")
 		h.gcRoomLocked(r)
 	}
 	delete(h.clients, c.ID)
@@ -478,6 +488,8 @@ func (h *Hub) command(c *Client, line string) Result {
 		h.reportLocked(c, strings.TrimPrefix(target, "@"), reason)
 	case "secure", "e2e", "encrypt":
 		h.secureLocked(c)
+	case "bell":
+		h.bellLocked(c, rest)
 	case "privacy", "policy":
 		h.privacyLocked(c)
 	case "forget":
@@ -532,6 +544,7 @@ func (h *Hub) helpLocked(c *Client, arg string) {
 		"/report <昵称> <原因> 举报给管理员",
 		"── 其他 · other ──",
 		"/tz <时区>           按你的时区显示时间，如 /tz +8",
+		"/bell on|off         被 @ 或收到私聊时响铃（默认开）",
 		"/clear  /quit",
 	}
 	if c.admin {
@@ -618,7 +631,7 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	if old := h.rooms[c.room]; old != nil {
 		c.seen[old.name] = old.seq
 		delete(old.members, c.ID)
-		h.roomSystemLocked(old, fmt.Sprintf("%s left for another room.", c.nick))
+		h.presenceLocked(old, c.nick, "left for another room", true)
 		h.gcRoomLocked(old)
 	}
 	r := h.rooms[name]
@@ -631,7 +644,7 @@ func (h *Hub) joinLocked(c *Client, name string) {
 		e.History = true
 		c.send(&e)
 	}
-	h.roomSystemLocked(r, fmt.Sprintf("%s joined.", c.nick)) // tell the others; the joiner gets "Now in …"
+	h.presenceLocked(r, c.nick, "joined", true) // tell the others; the joiner gets "Now in …"
 	r.members[c.ID] = c
 	topic := r.topic
 	if r.private {
@@ -1113,6 +1126,71 @@ func (h *Hub) secureLocked(c *Client) {
 	}})
 }
 
+// presenceLocked announces a join/leave. Busy rooms get a periodic summary
+// instead, so arrivals and departures don't drown the conversation. Kicks
+// and bans are never collapsed: moderation stays visible.
+func (h *Hub) presenceLocked(r *room, nick, verb string, collapsible bool) {
+	if r == nil {
+		return
+	}
+	if collapsible && h.cfg.QuietAbove > 0 && len(r.members) > h.cfg.QuietAbove {
+		if verb == "joined" {
+			r.joins++
+		} else {
+			r.leaves++
+		}
+		return
+	}
+	h.roomSystemLocked(r, fmt.Sprintf("%s %s.", nick, verb))
+}
+
+// FlushPresence posts the collapsed join/leave summary of busy rooms. Call it
+// periodically (e.g. every 30 seconds).
+func (h *Hub) FlushPresence() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.rooms {
+		if r.joins == 0 && r.leaves == 0 {
+			continue
+		}
+		var parts []string
+		if r.joins > 0 {
+			parts = append(parts, fmt.Sprintf("%d 人进入", r.joins))
+		}
+		if r.leaves > 0 {
+			parts = append(parts, fmt.Sprintf("%d 人离开", r.leaves))
+		}
+		h.roomSystemLocked(r, strings.Join(parts, "、")+fmt.Sprintf(" · %d joined, %d left", r.joins, r.leaves))
+		r.joins, r.leaves = 0, 0
+	}
+}
+
+func (h *Hub) bellLocked(c *Client, arg string) {
+	switch strings.ToLower(strings.TrimSpace(arg)) {
+	case "off", "0", "关":
+		c.noBell = true
+	case "on", "1", "开":
+		c.noBell = false
+	case "":
+		c.noBell = !c.noBell
+	default:
+		h.errorf(c, "用法：/bell on 或 /bell off")
+		return
+	}
+	if c.noBell {
+		h.infof(c, "响铃已关闭 · bell off")
+	} else {
+		h.infof(c, "被 @ 或收到私聊时会响铃 · bell on")
+	}
+}
+
+// BellOn reports whether the client wants a bell on mentions and DMs.
+func (h *Hub) BellOn(c *Client) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !c.noBell
+}
+
 // privacyLocked tells the user, from the live configuration, what this
 // server keeps about them and what it can't promise.
 func (h *Hub) privacyLocked(c *Client) {
@@ -1313,6 +1391,7 @@ type Status struct {
 	Uptime    time.Duration
 	Admin     bool
 	Muted     bool
+	Bell      bool // ring on @mentions and private messages
 	Loc       *time.Location
 }
 
@@ -1328,6 +1407,7 @@ func (h *Hub) Status(c *Client) Status {
 		Admin:  c.admin,
 		Muted:  !c.mutedUntil.IsZero() && time.Now().Before(c.mutedUntil),
 		Loc:    c.loc,
+		Bell:   !c.noBell,
 	}
 	s.RoomLabel = h.roomLabel(c.room)
 	if r := h.rooms[c.room]; r != nil {

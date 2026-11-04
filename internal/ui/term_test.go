@@ -73,3 +73,21 @@ func TestTermSendsAndRenders(t *testing.T) {
 		t.Fatal("escape sequence from user input reached the terminal")
 	}
 }
+
+func TestTermRingsOnDM(t *testing.T) {
+	hub := chat.NewHub(chat.Config{})
+	me, _ := hub.Connect("ip-me", false)
+	other, _ := hub.Connect("ip-other", false)
+	pr, pw := io.Pipe()
+	rw := &pipeRW{r: pr}
+	done := make(chan string)
+	go func() { done <- RunTerm(rw, hub, me, 80, 24, nil) }()
+	time.Sleep(100 * time.Millisecond)
+	hub.Handle(other, "/msg "+hub.Nick(me)+" ping")
+	time.Sleep(150 * time.Millisecond)
+	pw.Write([]byte{0x03})
+	<-done
+	if !strings.Contains(rw.String(), "\a") {
+		t.Fatal("no bell on private message")
+	}
+}

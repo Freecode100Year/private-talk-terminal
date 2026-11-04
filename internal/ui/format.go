@@ -236,3 +236,19 @@ func (f Formatter) inviteText(text string, inv *chat.Invite) string {
 	link := "\x1b]8;;" + inv.URL + "\x1b\\" + sNotice.R(label) + "\x1b]8;;\x1b\\"
 	return strings.Replace(text, inv.URL, link+sDim.R(note), 1)
 }
+
+// Rings reports whether an event should sound the terminal bell for the
+// viewer self: a private message, a mention from another room, or a line
+// here that mentions them. Replayed history never rings.
+func Rings(ev *chat.Event, self string) bool {
+	if ev.History {
+		return false
+	}
+	switch ev.Kind {
+	case chat.KindDMIn, chat.KindMention:
+		return true
+	case chat.KindChat, chat.KindAction:
+		return ev.From != self && Mentions(ev.Text, self)
+	}
+	return false
+}
