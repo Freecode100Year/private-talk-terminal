@@ -62,7 +62,7 @@ func TestTermSendsAndRenders(t *testing.T) {
 	io.WriteString(pw, "hello \x1b]0;evil\x07world\r")
 	time.Sleep(200 * time.Millisecond)
 	pw.Write([]byte{0x03}) // Ctrl+C
-	if msg := <-done; !strings.Contains(msg, "Bye") {
+	if msg := <-done; !strings.Contains(msg, "再见") {
 		t.Fatalf("exit message %q", msg)
 	}
 	out := rw.String()

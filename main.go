@@ -39,6 +39,7 @@ func main() {
 		adminUser   = flag.String("admin-user", envOr("PTT_ADMIN_USER", "admin"), "username admins log in with (their key is checked); everyone else never sends a key")
 		altAddr     = flag.String("alt-addr", envOr("PTT_ALT_ADDR", ""), "extra listen addresses, comma separated, e.g. :443 for users behind strict firewalls")
 		torExits    = flag.Bool("tor-exits", envOr("PTT_TOR_EXITS", "on") != "off", "fetch Tor's public exit list so Tor Browser users share the generous Tor limits instead of being capped per address")
+		lang        = flag.String("lang", envOr("PTT_LANG", "zh"), "interface language for clients that send no LANG: zh or en (env PTT_LANG)")
 		quietAbove  = flag.Int("quiet-above", 20, "rooms with more members than this show a join/leave summary every 30s instead of every line (-1 = never)")
 		secureURL   = flag.String("secure-url", envOr("PTT_SECURE_URL", "https://hr50.freedom8964.com/"), "HTML Room creator that /secure points to (end-to-end encrypted rooms)")
 		banFile     = flag.String("ban-file", envOr("PTT_BAN_FILE", ""), "persist bans across restarts in this file (opt-in; see README for the privacy trade-off)")
@@ -101,6 +102,7 @@ func main() {
 		TorExits:      *torExits,
 		SecureURL:     *secureURL,
 		QuietAbove:    *quietAbove,
+		Lang:          *lang,
 	})
 
 	srv, err := server.New(hub, server.Options{

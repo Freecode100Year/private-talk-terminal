@@ -72,3 +72,19 @@ func TestRings(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatterLanguage(t *testing.T) {
+	ev := chat.Event{ID: 987654, Kind: chat.KindSystem, Room: "general", Text: "小明 进入了房间", En: "小明 joined"}
+	zh := Formatter{Styled: true}.Lines(ev)[0]
+	en := Formatter{Styled: true, Lang: func() string { return "en" }}.Lines(ev)[0]
+	if !strings.Contains(zh, "进入了房间") || strings.Contains(zh, "joined") {
+		t.Fatalf("zh rendering %q", zh)
+	}
+	if !strings.Contains(en, "joined") || strings.Contains(en, "进入") {
+		t.Fatalf("en rendering %q (render cache must be per language)", en)
+	}
+	info := chat.Event{Kind: chat.KindInfo, Text: "标题", Lines: []string{"一"}, En: "Title", LinesEn: []string{"one"}}
+	if l := (Formatter{Lang: func() string { return "en" }}).Lines(info); !strings.HasSuffix(l[0], "* Title") || !strings.HasSuffix(l[1], "one") {
+		t.Fatalf("en info %q", l)
+	}
+}

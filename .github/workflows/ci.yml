@@ -116,7 +116,7 @@ jobs:
           grep -q "Onion:" /tmp/status.txt
           # the local side of the onion service accepts chat sessions
           out=$( (sleep 1; echo /quit) | ssh -T -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
-          echo "$out" | grep -q "Welcome"
+          echo "$out" | grep -Eq "欢迎|Welcome"
           ss -ltn > /tmp/ss.txt
           grep -q '127.0.0.1:2224 ' /tmp/ss.txt
 
@@ -126,7 +126,7 @@ jobs:
           set -x
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port 443
           out=$( (sleep 1; echo /quit) | ssh -T -p 443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
-          echo "$out" | grep -q "Welcome"
+          echo "$out" | grep -Eq "欢迎|Welcome"
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port off
           ss -ltn > /tmp/ss.txt
           if grep -q ':443 ' /tmp/ss.txt; then echo "443 still open"; exit 1; fi

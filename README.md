@@ -9,14 +9,14 @@ ssh -p 2222 guest@term.freedom8964.com
 ```
 
 ```
- PRIVATE-TALK TERMINAL                          Alice · Online 3 · Up 4d 12h · 18:34 CST
-ROOMS ▸#general 3   #chinese 0 +2   #english 0   #technology 0   #anonymous 0
+ PRIVATE-TALK TERMINAL                    Alice · 在线 3 · 运行 4d 12h · 18:34 CST
+房间 ▸#general 3   #chinese 0 +2   #english 0   #technology 0   #anonymous 0
 [18:32] <Alice> 大家晚上好！
 [18:33] <Ghost> Hello from New York!
 [18:33] <Anon42> 有人在学编程吗？@Alice
-[18:34] [私信 from Ghost] hi
-── #general · 3 here · 大厅 · Lobby — 什么都可以聊 ──────────────────────────────────
-> 说点什么… type a message or /help
+[18:34] [私信 来自 Ghost] hi
+── #general · 3 人 · 大厅 · 什么都可以聊 ─────────────────────────────────────────
+> 说点什么…  /help 查看命令
 Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 · Ctrl+C 退出   ● CONNECTED
 ```
 
@@ -29,7 +29,7 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 - **iSH Shell**：App Store 免费下载，先运行 `apk add openssh-client`，再运行上面的命令。
 - **Termius**：新建主机，地址 `term.freedom8964.com`，端口 `2222`，用户名 `guest`，密码留空。
 
-网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
+网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。界面语言按电脑的 `LANG` 自动选择；想要英文界面，把用户名换成 `en`，或进来后输入 `/lang en`。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
 
 ## 常用命令
 
@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 - [x] **备用 443 端口**：安装时加 `--alt-port 443`，给被防火墙拦住的用户一条路（借鉴 devzat）
 - [x] **核对主机指纹、`ssh chat` 短命令**：写进文档，`ptterm-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
 - [x] **Tor 出口 IP 共用宽松限额**：避免误伤用 Tor 浏览器直连的人（反向借鉴 devzat，它拒绝 Tor 用户）
-- [ ] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
+- [x] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
 - [ ] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
 - [ ] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
 

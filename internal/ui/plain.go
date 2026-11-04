@@ -20,7 +20,7 @@ import (
 // otherwise the client's own terminal handles line editing.
 func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width int) {
 	p := &plain{w: rw, hub: hub, c: c, pty: hasPty, width: width}
-	p.fmt = Formatter{Styled: false, Self: func() string { return hub.Nick(c) }, Loc: func() *time.Location { return hub.Loc(c) }}
+	p.fmt = Formatter{Styled: false, Self: func() string { return hub.Nick(c) }, Loc: func() *time.Location { return hub.Loc(c) }, Lang: func() string { return hub.Lang(c) }}
 	p.nl = "\n"
 	if hasPty {
 		p.nl = "\r\n"
@@ -28,7 +28,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 	if p.width <= 0 {
 		p.width = 80
 	}
-	p.write("PRIVATE-TALK TERMINAL (plain mode) · /help · /quit" + p.nl)
+	p.write(p.fmt.tr("PRIVATE-TALK TERMINAL（纯文本模式）· /help 帮助 · /quit 退出", "PRIVATE-TALK TERMINAL (plain mode) · /help · /quit") + p.nl)
 
 	lines := make(chan string)
 	quit := make(chan struct{})
@@ -53,7 +53,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 			}
 		case <-c.Done:
 			if r := c.Reason(); r != "" {
-				p.printRaw("Disconnected: " + r)
+				p.printRaw(p.fmt.tr("已断开：", "Disconnected: ") + r)
 			}
 			return
 		case <-quit:
@@ -63,14 +63,14 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 				if inv := findInvite(p.invites, arg); inv != nil {
 					p.printRaw(inv.URL)
 				} else {
-					p.printRaw("没有找到加密房间邀请。用法：/link 或 /link <编号>")
+					p.printRaw(p.fmt.tr("没有找到加密房间邀请。用法：/link 或 /link <编号>", "No encrypted-room invite found. Usage: /link or /link <number>"))
 				}
 				p.drawPrompt()
 				continue
 			}
 			res := hub.Handle(c, line)
 			if res.Quit {
-				p.printRaw("Bye! 再见。")
+				p.printRaw(p.fmt.tr("再见！", "Bye!"))
 				return
 			}
 			p.drawPrompt()

@@ -112,8 +112,8 @@ func TestEndToEndChat(t *testing.T) {
 	addr := startServer(t)
 	inA, outA := plainSession(t, dial(t, addr))
 	_, outB := plainSession(t, dial(t, addr))
-	waitFor(t, outA, "Now in #general")
-	waitFor(t, outB, "Now in #general")
+	waitFor(t, outA, "已进入 #general")
+	waitFor(t, outB, "已进入 #general")
 
 	io.WriteString(inA, "/nick Alice\n")
 	io.WriteString(inA, "你好 over ssh\n")
@@ -284,7 +284,7 @@ func TestAlternateListener(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	in, out := plainSession(t, dial(t, alt))
-	waitFor(t, out, "Now in #general")
+	waitFor(t, out, "已进入 #general")
 	_ = in
 }
 
@@ -308,5 +308,26 @@ func TestTorExitsShareTorBucket(t *testing.T) {
 	}
 	if srv.keyFor(local, normal) == OnionKey {
 		t.Fatal("ordinary address mapped to the Tor bucket")
+	}
+}
+
+func TestSessionLang(t *testing.T) {
+	cases := []struct {
+		user string
+		env  []string
+		want string
+	}{
+		{"guest", nil, ""},
+		{"en", []string{"LANG=zh_CN.UTF-8"}, "en"},
+		{"zh", nil, "zh"},
+		{"guest", []string{"LANG=en_US.UTF-8"}, "en_US.UTF-8"},
+		{"guest", []string{"LANG=en_US.UTF-8", "LC_ALL=zh_CN.UTF-8"}, "zh_CN.UTF-8"},
+		{"guest", []string{"LANGUAGE=de:en", "LANG=C"}, "de"},
+		{"guest", []string{"TERM=xterm"}, ""},
+	}
+	for _, c := range cases {
+		if got := sessionLang(c.user, c.env); got != c.want {
+			t.Errorf("sessionLang(%q, %v) = %q, want %q", c.user, c.env, got, c.want)
+		}
 	}
 }

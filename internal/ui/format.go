@@ -23,6 +23,17 @@ type Formatter struct {
 	Styled bool
 	Self   func() string         // current nickname of the viewer
 	Loc    func() *time.Location // viewer's timezone (nil = server local)
+	Lang   func() string         // viewer's language: "zh" (default) or "en"
+}
+
+func (f Formatter) en() bool { return f.Lang != nil && f.Lang() == "en" }
+
+// tr picks the Chinese or English string for the viewer.
+func (f Formatter) tr(zh, en string) string {
+	if f.en() {
+		return en
+	}
+	return zh
 }
 
 func (f Formatter) st(c sgr, s string) string {
@@ -40,6 +51,7 @@ type renderKey struct {
 	id   uint64
 	loc  *time.Location
 	hist bool
+	en   bool
 }
 
 var (
@@ -81,7 +93,7 @@ func (f Formatter) Lines(ev chat.Event) []string {
 	if f.Loc != nil {
 		loc = f.Loc()
 	}
-	k := renderKey{id: ev.ID, loc: loc, hist: ev.History}
+	k := renderKey{id: ev.ID, loc: loc, hist: ev.History, en: f.en()}
 	if v, ok := renderCache.Load(k); ok {
 		return v.([]string)
 	}
@@ -92,11 +104,17 @@ func (f Formatter) Lines(ev chat.Event) []string {
 
 func (f Formatter) lines(ev chat.Event) []string {
 	if ev.History && f.Styled { // replayed history: whole line dimmed
-		lines := Formatter{Self: f.Self, Loc: f.Loc}.lines(ev)
+		lines := Formatter{Self: f.Self, Loc: f.Loc, Lang: f.Lang}.lines(ev)
 		for i := range lines {
 			lines[i] = sDim.R(lines[i])
 		}
 		return lines
+	}
+	if ev.En != "" && f.en() { // ev is a copy
+		ev.Text = ev.En
+		if ev.LinesEn != nil {
+			ev.Lines = ev.LinesEn
+		}
 	}
 	t := ev.Time
 	if t.IsZero() {
@@ -142,9 +160,9 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindSystem:
 		head = ts + f.st(sDim, "-- "+ev.Text)
 	case chat.KindDMIn:
-		head = ts + f.st(sDM, "[私信 from "+ev.From+"] ") + ev.Text
+		head = ts + f.st(sDM, f.tr("[私信 来自 ", "[DM from ")+ev.From+"] ") + ev.Text
 	case chat.KindDMOut:
-		head = ts + f.st(sDM, "[私信 to "+ev.To+"] ") + ev.Text
+		head = ts + f.st(sDM, f.tr("[私信 发给 ", "[DM to ")+ev.To+"] ") + ev.Text
 	case chat.KindInfo:
 		head = ts + f.st(sInfo, "* "+ev.Text)
 	case chat.KindError:
@@ -152,9 +170,9 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindMention:
 		head = ts + f.st(sMention, "@ #"+ev.Room+" <"+ev.From+"> ") + ev.Text + f.st(sDim, "  · /join "+ev.Room)
 	case chat.KindNotice:
-		from := "System"
+		from := f.tr("系统", "System")
 		if ev.From != "" {
-			from = "Admin " + ev.From
+			from = f.tr("管理员 ", "Admin ") + ev.From
 		}
 		head = ts + f.st(sNotice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
 	default:
@@ -222,17 +240,17 @@ func isWordByte(s string, i int) bool {
 func (f Formatter) inviteText(text string, inv *chat.Invite) string {
 	title := inv.Title
 	if title == "" {
-		title = "加密房间"
+		title = f.tr("加密房间", "encrypted room")
 	}
 	where := inv.Host
 	if !inv.Trusted {
-		where = "⚠ 非默认站点 " + inv.Host
+		where = f.tr("⚠ 非默认站点 ", "⚠ not the default site ") + inv.Host
 	}
-	note := fmt.Sprintf("（需口令 · /link %d）", inv.N)
+	note := fmt.Sprintf(f.tr("（需口令 · /link %d）", " (passphrase needed · /link %d)"), inv.N)
 	if !f.Styled {
 		return strings.Replace(text, inv.URL, fmt.Sprintf("🔐 [%s · %s] %s %s", title, where, inv.URL, note), 1)
 	}
-	label := fmt.Sprintf("🔐 打开「%s」· %s", title, where)
+	label := fmt.Sprintf(f.tr("🔐 打开「%s」· %s", "🔐 open “%s” · %s"), title, where)
 	link := "\x1b]8;;" + inv.URL + "\x1b\\" + sNotice.R(label) + "\x1b]8;;\x1b\\"
 	return strings.Replace(text, inv.URL, link+sDim.R(note), 1)
 }

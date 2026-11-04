@@ -256,9 +256,14 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 			return
 		}
 		admin := s.isAdminUser(sess.User()) && s.isAdmin(sess.PublicKey())
-		c, err := s.hub.Connect(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin)
+		lang := sessionLang(sess.User(), sess.Environ())
+		c, err := s.hub.ConnectLang(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin, lang)
 		if err != nil {
-			wish.Fatalln(sess, "Sorry: "+err.Error())
+			msg := "Sorry: " + err.Error()
+			if zh, ok := refusalZh[err]; ok && s.hub.LangFor(lang) == "zh" {
+				msg = "抱歉：" + zh
+			}
+			wish.Fatalln(sess, msg)
 			return
 		}
 		if admin {
@@ -452,4 +457,39 @@ func loadAuthorizedKeys(path string) ([][]byte, error) {
 		keys = append(keys, k.Marshal())
 	}
 	return keys, sc.Err()
+}
+
+var refusalZh = map[error]string{
+	chat.ErrBanned:       "这个地址暂时被封禁了",
+	chat.ErrFull:         "服务器已满，请稍后再试",
+	chat.ErrTooManyConns: "你的地址连接数太多了",
+	chat.ErrConnRate:     "连接太频繁，请等一分钟",
+}
+
+// sessionLang picks the interface language: the login name "en"/"zh" (handy
+// on phones, whose SSH apps rarely send LANG), else the client's locale
+// (OpenSSH sends LANG/LC_* by default on most systems), else "" for the
+// server default. Only the language is used; the environment isn't stored.
+func sessionLang(user string, env []string) string {
+	switch strings.ToLower(user) {
+	case "en", "english":
+		return "en"
+	case "zh", "cn", "chinese":
+		return "zh"
+	}
+	vals := map[string]string{}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && (k == "LC_ALL" || k == "LC_MESSAGES" || k == "LANG" || k == "LANGUAGE") {
+			vals[k] = v
+		}
+	}
+	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"} {
+		if v := vals[k]; v != "" {
+			if k == "LANGUAGE" { // colon-separated preference list
+				v, _, _ = strings.Cut(v, ":")
+			}
+			return v
+		}
+	}
+	return ""
 }

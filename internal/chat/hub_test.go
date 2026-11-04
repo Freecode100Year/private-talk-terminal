@@ -20,7 +20,7 @@ func drain(c *Client) []Event {
 
 func has(evs []Event, kind Kind, substr string) bool {
 	for _, e := range evs {
-		if e.Kind == kind && strings.Contains(e.Text, substr) {
+		if e.Kind == kind && (strings.Contains(e.Text, substr) || strings.Contains(e.En, substr)) {
 			return true
 		}
 	}
@@ -611,5 +611,48 @@ func TestBellToggle(t *testing.T) {
 	h.Handle(a, "/bell on")
 	if !h.BellOn(a) {
 		t.Fatal("/bell on ignored")
+	}
+}
+
+func TestLanguage(t *testing.T) {
+	for in, want := range map[string]string{"zh_CN.UTF-8": "zh", "zh_TW": "zh", "en_US.UTF-8": "en", "de_DE": "en", "C.UTF-8": "zh", "": "zh", "POSIX": "zh"} {
+		if got := normLang(in, "zh"); got != want {
+			t.Errorf("normLang(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if normLang("C", "en") != "en" {
+		t.Error("server default not used for C locale")
+	}
+	h := newTestHub()
+	a, _ := h.ConnectLang("a", false, "en_GB.UTF-8")
+	b, _ := h.Connect("b", false)
+	if h.Lang(a) != "en" || h.Lang(b) != "zh" {
+		t.Fatalf("langs %q %q", h.Lang(a), h.Lang(b))
+	}
+	evs := drain(a)
+	if len(evs) == 0 || evs[0].En == "" || !strings.Contains(evs[0].En, "Welcome") || !strings.Contains(evs[0].Text, "欢迎") {
+		t.Fatalf("welcome not bilingual: %+v", evs)
+	}
+	drain(b)
+	h.Handle(b, "/lang en")
+	if h.Lang(b) != "en" {
+		t.Fatal("/lang en had no effect")
+	}
+	h.Handle(b, "/lang zh")
+	if h.Lang(b) != "zh" {
+		t.Fatal("/lang zh had no effect")
+	}
+	// every server message to a client carries both languages
+	drain(a)
+	for _, cmd := range []string{"/help", "/help all", "/rooms", "/who", "/privacy", "/secure", "/bell", "/tz", "/join nope", "/nick x", "/frobnicate"} {
+		h.Handle(a, cmd)
+		for _, ev := range drain(a) {
+			if ev.Kind != KindChat && ev.Kind != KindAction && ev.En == "" {
+				t.Errorf("%s: event without English text: %q", cmd, ev.Text)
+			}
+			if len(ev.Lines) > 0 && len(ev.LinesEn) == 0 {
+				t.Errorf("%s: lines without English: %q", cmd, ev.Text)
+			}
+		}
 	}
 }

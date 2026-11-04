@@ -108,7 +108,7 @@ type Term struct {
 // window changes.
 func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int, resize <-chan ssh.Window) string {
 	t := &Term{w: rw, hub: hub, c: c, width: width, height: height, last: map[int]string{}}
-	t.fmt = Formatter{Styled: true, Self: func() string { return t.status.Nick }, Loc: func() *time.Location { return t.status.Loc }}
+	t.fmt = Formatter{Styled: true, Self: func() string { return t.status.Nick }, Loc: func() *time.Location { return t.status.Loc }, Lang: func() string { return t.status.Lang }}
 	t.status = hub.Status(c)
 
 	keys := make(chan key, 64)
@@ -158,7 +158,7 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 			t.flush()
 		case k := <-keys:
 			if quit := t.handleKey(k); quit {
-				return "Bye! 再见。"
+				return t.fmt.tr("再见！", "Bye!")
 			}
 			t.flush()
 		case ws, ok := <-resize:
@@ -175,9 +175,9 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 			t.flush()
 		case <-c.Done:
 			if r := c.Reason(); r != "" {
-				return "Disconnected: " + r
+				return t.fmt.tr("已断开：", "Disconnected: ") + r
 			}
-			return "Bye! 再见。"
+			return t.fmt.tr("再见！", "Bye!")
 		case <-readerDone:
 			return ""
 		}
@@ -326,7 +326,7 @@ func (t *Term) fullRedraw() {
 	t.last = map[int]string{}
 	t.out.WriteString("\x1b[r\x1b[0m\x1b[H\x1b[2J")
 	if t.tooSmall() {
-		t.out.WriteString("Window too small · 窗口太小")
+		t.out.WriteString(t.fmt.tr("窗口太小", "Window too small"))
 		return
 	}
 	fmt.Fprintf(&t.out, "\x1b]2;%s\x07", "Private-Talk Terminal")
@@ -382,7 +382,7 @@ func (t *Term) headerLine() string {
 		loc = time.Local
 	}
 	left := " PRIVATE-TALK TERMINAL "
-	right := fmt.Sprintf(" %s · Online %d · Up %s · %s ", s.Nick, s.Online, Uptime(s.Uptime), time.Now().In(loc).Format("15:04 MST"))
+	right := fmt.Sprintf(t.fmt.tr(" %s · 在线 %d · 运行 %s · %s ", " %s · Online %d · Up %s · %s "), s.Nick, s.Online, Uptime(s.Uptime), time.Now().In(loc).Format("15:04 MST"))
 	if width(left)+width(right) > t.width {
 		right = fmt.Sprintf(" %s · %d online ", s.Nick, s.Online)
 	}
@@ -392,7 +392,7 @@ func (t *Term) headerLine() string {
 
 func (t *Term) roomsLine() string {
 	var b strings.Builder
-	b.WriteString(sDim.R("ROOMS "))
+	b.WriteString(sDim.R(t.fmt.tr("房间 ", "ROOMS ")))
 	for _, r := range t.status.Rooms {
 		item := fmt.Sprintf("%s %d", r.Label, r.Users)
 		switch {
@@ -419,7 +419,7 @@ func unreadLabel(n int) string {
 
 func (t *Term) drawSeparator() {
 	s := t.status
-	txt := "── " + s.RoomLabel + fmt.Sprintf(" · %d here", s.RoomUsers)
+	txt := "── " + s.RoomLabel + fmt.Sprintf(t.fmt.tr(" · %d 人", " · %d here"), s.RoomUsers)
 	if s.Topic != "" {
 		txt += " · " + s.Topic
 	}
@@ -432,11 +432,11 @@ func (t *Term) drawSeparator() {
 		line += sNotice.R("[ADMIN] ")
 	}
 	if t.scroll > 0 {
-		more := fmt.Sprintf("↑ scrolled %d", t.scroll)
+		more := fmt.Sprintf(t.fmt.tr("↑ 已上翻 %d", "↑ scrolled %d"), t.scroll)
 		if t.unseen > 0 {
-			more = fmt.Sprintf("↓ %d new", t.unseen)
+			more = fmt.Sprintf(t.fmt.tr("↓ %d 条新消息", "↓ %d new"), t.unseen)
 		}
-		line += sNotice.R(more + " · End 回到底部 ")
+		line += sNotice.R(more + t.fmt.tr(" · End 回到底部 ", " · End to jump back "))
 	}
 	if pad := t.width - width(line); pad > 0 {
 		line += sDim.R(strings.Repeat("─", pad))
@@ -445,11 +445,11 @@ func (t *Term) drawSeparator() {
 }
 
 func (t *Term) footerLine() string {
-	keys := "Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 · Ctrl+C 退出"
+	keys := t.fmt.tr("Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 · Ctrl+C 退出", "Enter send · ↑↓ history · PgUp/PgDn scroll · Tab complete · Esc clear · Ctrl+C quit")
 	st := sOK.R("● CONNECTED")
 	gap := t.width - width(keys) - width(st) - 1
 	if gap < 1 {
-		keys = "Enter 发送 · PgUp/PgDn · Ctrl+C 退出"
+		keys = t.fmt.tr("Enter 发送 · PgUp/PgDn · Ctrl+C 退出", "Enter send · PgUp/PgDn · Ctrl+C quit")
 		gap = max(1, t.width-width(keys)-width(st)-1)
 	}
 	return truncate(sDim.R(keys)+strings.Repeat(" ", gap)+st, t.width, "")
@@ -460,7 +460,7 @@ func (t *Term) inputView() (string, int) {
 	prompt := "> "
 	avail := max(4, t.width-width(prompt)-1)
 	if len(t.input) == 0 {
-		ph := truncate("说点什么… type a message or /help", avail, "")
+		ph := truncate(t.fmt.tr("说点什么…  /help 查看命令", "Type a message…  /help for commands"), avail, "")
 		return sPrompt.R(prompt) + sDim.R(ph), width(prompt) + 1
 	}
 	// choose a start so the cursor stays visible
@@ -905,7 +905,7 @@ func findInvite(events []*chat.Event, arg string) *chat.Invite {
 func (t *Term) showLink(arg string) {
 	inv := findInvite(t.events, arg)
 	if inv == nil {
-		t.addEvent(&chat.Event{Time: time.Now(), Kind: chat.KindError, Text: "没有找到加密房间邀请。用法：/link 或 /link <编号>"})
+		t.addEvent(&chat.Event{Time: time.Now(), Kind: chat.KindError, Text: "没有找到加密房间邀请。用法：/link 或 /link <编号>", En: "No encrypted-room invite found. Usage: /link or /link <number>"})
 		t.drawInput()
 		return
 	}
@@ -913,15 +913,14 @@ func (t *Term) showLink(arg string) {
 	t.out.WriteString("\x1b[r\x1b[0m\x1b[H\x1b[2J")
 	title := inv.Title
 	if title == "" {
-		title = "加密房间"
+		title = t.fmt.tr("加密房间", "encrypted room")
 	}
-	fmt.Fprintf(&t.out, "%s\r\n\r\n", sBold.R(fmt.Sprintf("🔐 邀请 #%d「%s」· %s", inv.N, title, inv.Host)))
+	fmt.Fprintf(&t.out, "%s\r\n\r\n", sBold.R(fmt.Sprintf(t.fmt.tr("🔐 邀请 #%d「%s」· %s", "🔐 Invite #%d “%s” · %s"), inv.N, title, inv.Host)))
 	if !inv.Trusted {
-		fmt.Fprintf(&t.out, "%s\r\n\r\n", sError.R("⚠ 这个链接不在本服务器默认的 HTML Room 站点上，打开前请确认来源。"))
+		fmt.Fprintf(&t.out, "%s\r\n\r\n", sError.R(t.fmt.tr("⚠ 这个链接不在本服务器默认的 HTML Room 站点上，打开前请确认来源。", "⚠ This link is not on this server's default HTML Room site — check where it came from before opening.")))
 	}
 	t.out.WriteString(inv.URL)
 	t.out.WriteString("\r\n\r\n")
-	t.out.WriteString(sDim.R("复制或点开上面的链接，在浏览器里打开；口令请向发送者另行索取，进房后核对安全码。") + "\r\n")
-	t.out.WriteString(sDim.R("Copy or open the link above; ask the sender for the passphrase.") + "\r\n\r\n")
-	t.out.WriteString(sPrompt.R("按任意键返回聊天 · press any key to go back"))
+	t.out.WriteString(sDim.R(t.fmt.tr("复制或点开上面的链接，在浏览器里打开；口令请向发送者另行索取，进房后核对安全码。", "Copy or open the link above in a browser; ask the sender for the passphrase another way, and compare the safety code in the room.")) + "\r\n\r\n")
+	t.out.WriteString(sPrompt.R(t.fmt.tr("按任意键返回聊天", "Press any key to go back")))
 }

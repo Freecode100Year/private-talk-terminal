@@ -367,6 +367,9 @@ GOMEMLIMIT=$(mem_limit)
 # Public rooms, first one is the lobby. Empty = built-in defaults.
 #PTT_ROOMS=general:大厅 Lobby,chinese:中文频道,english:English,technology:技术,anonymous:随便聊
 
+# Interface language for clients that send no LANG (zh or en).
+#PTT_LANG=zh
+
 # Keep bans across restarts (install.sh --persist-bans). Off by default: it
 # stores the address-hash key on disk next to the ban list.
 #PTT_BAN_FILE=/var/lib/ptterm/bans.json
