@@ -92,6 +92,9 @@ sudo ptterm-ctl status        # 输出里的 Host key: SHA256:…
 | `PTT_ADMIN_USER` / `-admin-user` | `admin` | 管理员登录用的用户名 |
 | `PTT_ONION_ADDR` / `-onion-addr` | — | 给 Tor 洋葱服务用的本地监听地址（`--tor` 自动设为 `127.0.0.1:2224`） |
 | `PTT_BAN_FILE` / `-ban-file` | — | 封禁持久化文件（`--persist-bans` 设为 `/var/lib/ptterm/bans.json`） |
+| `PTT_ALT_ADDR` / `-alt-addr` | — | 额外监听地址，逗号分隔（`--alt-port 443` 设为 `:443`） |
+| `PTT_TOR_EXITS` / `-tor-exits` | `on` | 定期下载 Tor 出口节点列表，让 Tor 用户共用宽松限额；`off` 关闭 |
+| `-quiet-above` | 20 | 房间超过这个人数后，进出提示改为每 30 秒汇总一次（-1 = 不汇总） |
 | `PTT_SECURE_URL` / `-secure-url` | `https://hr50.freedom8964.com/` | `/secure` 指向的 HTML Room 创建页；其他站点的邀请会显示警告 |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | 连接限制 |

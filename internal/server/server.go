@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/ssh"
@@ -53,6 +54,7 @@ type Options struct {
 	OnionMaxTCP   int      // TCP connections allowed through the onion listener (default 400)
 	BanFile       string   // optional: persist bans here (see bans.go for the privacy trade-off)
 	AltAddrs      []string // extra listen addresses, e.g. ":443" for networks that block other ports
+	TorExits      bool     // fetch Tor's exit list so Tor Browser users share the Tor bucket
 }
 
 // OnionKey is the shared rate-limit key for everyone arriving via Tor: the
@@ -75,17 +77,19 @@ type Server struct {
 	tcpConns map[string]int
 	tcpMax   int
 
-	adminUser string
-	onionAddr string
-	onionMax  int
-	banFile   string
-	altAddrs  []string
+	adminUser  string
+	onionAddr  string
+	onionMax   int
+	banFile    string
+	altAddrs   []string
+	torExitsOn bool
+	torExits   atomic.Pointer[exitSet]
 }
 
 // New builds the SSH server around hub.
 func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	s := &Server{hub: hub, log: log, salt: make([]byte, 32), tcpConns: map[string]int{}, tcpMax: opt.MaxTCPPerIP,
-		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs}
+		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs, torExitsOn: opt.TorExits}
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
 	}
@@ -214,6 +218,11 @@ func sameAddr(a, b string) bool {
 func (s *Server) keyFor(local, remote net.Addr) string {
 	if s.isOnion(local) {
 		return OnionKey
+	}
+	if host, _, err := net.SplitHostPort(remote.String()); err == nil {
+		if ip := net.ParseIP(host); ip != nil && s.isTorExit(ip.String()) {
+			return OnionKey // a Tor exit relay: many people, one address
+		}
 	}
 	return s.addrKey(remote)
 }
@@ -372,6 +381,9 @@ func (s *Server) Run(ctx context.Context) error {
 				errc <- err
 			}
 		}()
+	}
+	if s.torExitsOn {
+		go s.refreshTorExits(ctx)
 	}
 	persistDone := make(chan struct{})
 	pctx, stopPersist := context.WithCancel(context.Background())

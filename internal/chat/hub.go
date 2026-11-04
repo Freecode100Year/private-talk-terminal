@@ -76,6 +76,7 @@ type Config struct {
 	// Facts about the deployment that /privacy reports to users.
 	PersistBans bool // address-hash key stored on disk (-ban-file)
 	TorEnabled  bool // an onion listener is configured
+	TorExits    bool // Tor exit relays share the Tor bucket
 	// SecureURL is the HTML Room creator /secure points to; invites to other
 	// hosts are shown with a warning.
 	SecureURL string
@@ -1198,9 +1199,12 @@ func (h *Hub) privacyLocked(c *Client) {
 	if h.cfg.PersistBans {
 		bans = "已开启持久化：仅被封禁地址的哈希写入磁盘 · persisted (hashes of banned addresses only)"
 	}
-	tor := "未开启 · not enabled on this server"
+	tor := "未开启洋葱服务 · no onion service"
 	if h.cfg.TorEnabled {
-		tor = "已开启，可通过 .onion 地址连接，服务器看不到你的 IP · available"
+		tor = "已开启，可通过 .onion 地址连接，服务器看不到你的 IP · onion service available"
+	}
+	if h.cfg.TorExits {
+		tor += "；用 Tor 浏览器直连也欢迎，Tor 用户共用一组宽松限额"
 	}
 	idle := "不限 · none"
 	if h.cfg.IdleKick > 0 {

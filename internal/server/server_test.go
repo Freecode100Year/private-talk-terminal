@@ -287,3 +287,26 @@ func TestAlternateListener(t *testing.T) {
 	waitFor(t, out, "Now in #general")
 	_ = in
 }
+
+func TestTorExitsShareTorBucket(t *testing.T) {
+	srv, err := New(chat.NewHub(chat.Config{}), Options{Addr: "127.0.0.1:0", HostKeyPath: filepath.Join(t.TempDir(), "hk")},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ips := parseExitList(strings.NewReader("# Tor exits\n185.220.101.1\n2001:db8::7\nnot-an-ip\n\n"))
+	if len(ips) != 2 {
+		t.Fatalf("parsed %v", ips)
+	}
+	srv.setTorExits(ips)
+	local := &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 2222}
+	exit := &net.TCPAddr{IP: net.ParseIP("185.220.101.1"), Port: 40000}
+	mapped := &net.TCPAddr{IP: net.ParseIP("::ffff:185.220.101.1"), Port: 40000}
+	normal := &net.TCPAddr{IP: net.ParseIP("203.0.113.5"), Port: 40000}
+	if srv.keyFor(local, exit) != OnionKey || srv.keyFor(local, mapped) != OnionKey {
+		t.Fatal("Tor exit not mapped to the shared Tor bucket")
+	}
+	if srv.keyFor(local, normal) == OnionKey {
+		t.Fatal("ordinary address mapped to the Tor bucket")
+	}
+}
