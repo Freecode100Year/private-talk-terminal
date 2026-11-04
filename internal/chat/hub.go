@@ -313,11 +313,8 @@ func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
 	h.byNick[strings.ToLower(c.nick)] = c
 	h.perIP[ipKey]++
 
-	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("Welcome, %s · 欢迎！你的身份是随机分配的。", c.nick), Lines: []string{
-		"输入文字后按 Enter 发送。/help 查看全部命令。",
-		"Type and press Enter to talk. /help lists all commands.",
-		"提醒：SSH 只加密传输，服务器能看到消息内容；不要发送真实身份信息。",
-		"本服务器存什么、不存什么：/privacy    删除你发过的消息：/forget",
+	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("Welcome, %s · 欢迎！直接打字就能聊天，/help 查看命令。", c.nick), Lines: []string{
+		"服务器能看到聊天内容，别发能认出你的信息 · /privacy",
 	}})
 	if len(h.cfg.Motd) > 0 {
 		c.send(&Event{Kind: KindNotice, Text: h.cfg.Motd[0], Lines: h.cfg.Motd[1:]})
@@ -444,7 +441,7 @@ func (h *Hub) command(c *Client, line string) Result {
 
 	switch cmd {
 	case "help", "h", "?":
-		h.helpLocked(c)
+		h.helpLocked(c, rest)
 	case "rooms", "list":
 		h.roomsLocked(c)
 	case "join", "j":
@@ -502,38 +499,50 @@ func (h *Hub) command(c *Client, line string) Result {
 	return Result{}
 }
 
-func (h *Hub) helpLocked(c *Client) {
+// helpLocked shows the handful of commands people actually need; everything
+// else is one step away under "/help all", so newcomers aren't handed a manual.
+func (h *Hub) helpLocked(c *Client, arg string) {
+	if a := strings.ToLower(strings.TrimSpace(arg)); a != "all" && a != "more" && a != "全部" {
+		c.send(&Event{Kind: KindInfo, Text: "常用命令 · Commands（直接打字就是发言）", Lines: []string{
+			"/rooms              有哪些房间 · list rooms",
+			"/join <房间>        进入房间，如 /join chinese · join a room",
+			"/msg <昵称> <内容>  私聊 · private message",
+			"/nick <名字>        改昵称 · change nickname",
+			"/who                谁在这里 · who is here",
+			"/quit               退出 · leave",
+			"/help all           全部命令：私人房间、加密房间、屏蔽、隐私… · all commands",
+		}})
+		return
+	}
 	lines := []string{
-		"/rooms                 列出公共频道 · list public rooms",
-		"/join <room|code>      进入频道或私人房间 · join a room or private code",
-		"/create                创建私人房间（凭码进入）· new private room",
-		"/leave                 回到 #general · back to the lobby",
-		"/msg <nick> <text>     私聊 · private message   (/r <text> 回复)",
-		"/nick <name>           修改昵称 · change nickname",
-		"/who                   当前房间在线用户 · who is here",
-		"/me <action>           动作消息 · action",
-		"/ignore <nick>         屏蔽某人（/unignore 取消）· hide someone",
-		"/report <nick> <why>   举报给管理员 · report to moderators",
-		"/tz <zone>             时区，如 /tz Asia/Shanghai 或 /tz +8 · timezone",
-		"/secure                端到端加密房间（连服务器都看不到）· end-to-end encrypted room",
-		"/link [N]              显示加密房间邀请的完整链接 · show an invite link",
-		"/privacy               本服务器的数据政策 · what this server keeps",
-		"/forget                从房间历史删除你的消息 · erase your messages",
-		"房间栏 +N = 其他房间的未读消息，@N = 有人在那边 @了你 · +N unread, @N mentioned",
-		"/clear                 清屏 · clear screen",
-		"/quit                  退出 · disconnect",
-		"//text                 发送以 / 开头的文字 · send a literal '/'",
+		"── 聊天 · chat ──",
+		"/msg <昵称> <内容>   私聊；/r <内容> 回复上一个私信你的人",
+		"/me <动作>           动作消息，如 /me 挥手",
+		"/nick <名字>         改昵称（2–16 字，中文可以）",
+		"//text               发送以 / 开头的文字",
+		"── 房间 · rooms ──",
+		"/rooms  /join <房间>  /leave   房间栏 +N 未读，@N 有人 @你",
+		"/create              私人房间，凭房间码进入，没人时自动销毁",
+		"/who                 当前房间的人",
+		"── 隐私与安全 · privacy ──",
+		"/privacy             本服务器存什么、不存什么",
+		"/forget              从服务器删除你发过的消息",
+		"/secure              端到端加密房间（连服务器都看不到）；/link 看邀请链接",
+		"/ignore <昵称>       屏蔽某人（/unignore 取消）",
+		"/report <昵称> <原因> 举报给管理员",
+		"── 其他 · other ──",
+		"/tz <时区>           按你的时区显示时间，如 /tz +8",
+		"/clear  /quit",
 	}
 	if c.admin {
 		lines = append(lines,
-			"── admin ──",
-			"/kick <nick> [reason]  /mute <nick> [min]  /unmute <nick>",
-			"/ban <nick> [min]      /unbanall  /broadcast <text>  /topic <text>",
-			"/reports               最近的举报 · recent reports",
-			"/bans                  封禁列表 · list bans    /unban <id>  解封",
+			"── 管理员 · admin ──",
+			"/kick <昵称> [原因]  /mute <昵称> [分钟]  /unmute <昵称>",
+			"/ban <昵称> [分钟]   /bans  /unban <id>  /unbanall",
+			"/broadcast <内容>    /topic <内容>  /reports",
 		)
 	}
-	c.send(&Event{Kind: KindInfo, Text: "Commands · 命令", Lines: lines})
+	c.send(&Event{Kind: KindInfo, Text: "全部命令 · All commands", Lines: lines})
 }
 
 func (h *Hub) roomsLocked(c *Client) {
@@ -622,8 +631,8 @@ func (h *Hub) joinLocked(c *Client, name string) {
 		e.History = true
 		c.send(&e)
 	}
+	h.roomSystemLocked(r, fmt.Sprintf("%s joined.", c.nick)) // tell the others; the joiner gets "Now in …"
 	r.members[c.ID] = c
-	h.roomSystemLocked(r, fmt.Sprintf("%s joined.", c.nick))
 	topic := r.topic
 	if r.private {
 		topic = "private room · 私人房间"

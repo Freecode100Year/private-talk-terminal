@@ -550,3 +550,24 @@ func TestPrivacyReflectsConfig(t *testing.T) {
 		t.Errorf("defaults not reported:\n%s", all)
 	}
 }
+
+func TestHelpIsShortByDefault(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	drain(a)
+	h.Handle(a, "/help")
+	short := drain(a)
+	if len(short) != 1 || len(short[0].Lines) > 8 || !strings.Contains(strings.Join(short[0].Lines, "\n"), "/help all") {
+		t.Fatalf("default help should be a short list pointing to /help all: %+v", short)
+	}
+	h.Handle(a, "/help all")
+	all := strings.Join(drain(a)[0].Lines, "\n")
+	for _, cmd := range []string{"/secure", "/forget", "/privacy", "/ignore", "/create", "/tz"} {
+		if !strings.Contains(all, cmd) {
+			t.Errorf("/help all missing %s", cmd)
+		}
+	}
+	if strings.Contains(all, "/kick") {
+		t.Error("admin commands shown to a non-admin")
+	}
+}

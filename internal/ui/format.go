@@ -228,7 +228,7 @@ func (f Formatter) inviteText(text string, inv *chat.Invite) string {
 	if !inv.Trusted {
 		where = "⚠ 非默认站点 " + inv.Host
 	}
-	note := fmt.Sprintf("（需要口令，向发送者另行索取 · /link %d 查看完整链接）", inv.N)
+	note := fmt.Sprintf("（需口令 · /link %d）", inv.N)
 	if !f.Styled {
 		return strings.Replace(text, inv.URL, fmt.Sprintf("🔐 [%s · %s] %s %s", title, where, inv.URL, note), 1)
 	}
