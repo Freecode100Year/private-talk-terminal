@@ -35,6 +35,7 @@ func main() {
 		maxClients  = flag.Int("max-clients", 1000, "maximum concurrent sessions")
 		perIP       = flag.Int("max-per-ip", 3, "maximum concurrent sessions per address (IPv6 per /64)")
 		connPerMin  = flag.Int("conn-per-min", 10, "new sessions per address per minute")
+		readRate    = flag.Int("read-rate", 32<<10, "bytes per second one connection may send before it is slowed down (0 = off)")
 		tcpPerIP    = flag.Int("max-tcp-per-ip", 8, "raw TCP connections per address, including unauthenticated ones")
 		adminUser   = flag.String("admin-user", envOr("PTT_ADMIN_USER", "admin"), "username admins log in with (their key is checked); everyone else never sends a key")
 		altAddr     = flag.String("alt-addr", envOr("PTT_ALT_ADDR", ""), "extra listen addresses, comma separated, e.g. :443 for users behind strict firewalls")
@@ -111,6 +112,8 @@ func main() {
 		AdminKeysPath: *adminKeys,
 		IdleTimeout:   connIdle(*idle),
 		MaxTCPPerIP:   *tcpPerIP,
+		ReadRate:      *readRate,
+		ReadBurst:     8 * *readRate,
 		AdminUser:     *adminUser,
 		OnionAddr:     *onionAddr,
 		BanFile:       *banFile,

@@ -331,3 +331,26 @@ func TestSessionLang(t *testing.T) {
 		}
 	}
 }
+
+func TestReadThrottle(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	c := &countedConn{Conn: b, release: func() {}, rate: 100 << 10, burst: 50 << 10, tokens: 50 << 10, last: time.Now()}
+	defer c.Close()
+	go func() {
+		buf := make([]byte, 4096)
+		for i := 0; i < 50; i++ { // 200 KiB
+			if _, err := a.Write(buf); err != nil {
+				return
+			}
+		}
+		a.Close()
+	}()
+	start := time.Now()
+	n, _ := io.Copy(io.Discard, c)
+	el := time.Since(start)
+	// 200 KiB with a 50 KiB burst at 100 KiB/s needs about 1.5 s
+	if n != 200<<10 || el < 1200*time.Millisecond || el > 4*time.Second {
+		t.Fatalf("read %d bytes in %s", n, el)
+	}
+}

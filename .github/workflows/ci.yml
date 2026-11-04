@@ -181,3 +181,38 @@ jobs:
           done
           echo "::error title=journal::$(sudo journalctl -u ptterm -n 40 --no-pager 2>&1 | enc)"
           echo "::error title=systemctl::$(systemctl status ptterm --no-pager 2>&1 | tail -n 20 | enc)"
+
+  docker:
+    # The container image builds, runs as non-root on a read-only root
+    # filesystem, and serves the chat.
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build --build-arg VERSION=ci -t ptterm:ci .
+
+      - name: Run and chat
+        run: |
+          set -x
+          docker run -d --name ptterm --network host --read-only --cap-drop ALL \
+            --security-opt no-new-privileges -v ptterm-data:/data -e PTT_ADDR=:2290 ptterm:ci
+          for _ in $(seq 1 30); do ss -ltn | grep -q ':2290 ' && break; sleep 0.5; done
+          out=$( (sleep 1; echo "/nick dock"; sleep 0.5; echo "hi from docker"; sleep 0.5; echo /quit) \
+            | ssh -T -p 2290 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null en@127.0.0.1 )
+          echo "$out"
+          echo "$out" | grep -q "Welcome"
+          echo "$out" | grep -q "<dock> hi from docker"
+          test "$(docker exec ptterm /usr/local/bin/ptterm -version)" = "ptterm ci"
+          # the host key lands in the volume and survives a restart
+          fp1=$(ssh-keyscan -p 2290 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
+          docker restart ptterm
+          for _ in $(seq 1 30); do ss -ltn | grep -q ':2290 ' && break; sleep 0.5; done
+          sleep 1
+          fp2=$(ssh-keyscan -p 2290 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
+          test -n "$fp1" && test "$fp1" = "$fp2"
+
+      - name: Logs
+        if: always()
+        run: docker logs ptterm 2>&1 | tail -50 || true

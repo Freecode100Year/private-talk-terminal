@@ -49,6 +49,8 @@ type Options struct {
 	MaxTimeout    time.Duration // absolute session limit (0 = none)
 	Banner        string
 	MaxTCPPerIP   int      // raw TCP connections per address, incl. unauthenticated (default 8)
+	ReadRate      int      // bytes/s a connection may send us; excess is slowed down, not dropped (0 = off)
+	ReadBurst     int      // bytes allowed at full speed before ReadRate applies
 	AdminUser     string   // username that authenticates with an admin key (default "admin")
 	OnionAddr     string   // optional second listener for a Tor onion service (e.g. 127.0.0.1:2224)
 	OnionMaxTCP   int      // TCP connections allowed through the onion listener (default 400)
@@ -73,9 +75,11 @@ type Server struct {
 	admins [][]byte
 	log    *slog.Logger
 
-	tcpMu    sync.Mutex
-	tcpConns map[string]int
-	tcpMax   int
+	tcpMu     sync.Mutex
+	tcpConns  map[string]int
+	tcpMax    int
+	readRate  float64
+	readBurst float64
 
 	adminUser  string
 	onionAddr  string
@@ -92,6 +96,9 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs, torExitsOn: opt.TorExits}
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
+	}
+	if opt.ReadRate > 0 {
+		s.readRate, s.readBurst = float64(opt.ReadRate), float64(max(opt.ReadBurst, opt.ReadRate))
 	}
 	if s.adminUser == "" {
 		s.adminUser = "admin"
@@ -292,7 +299,8 @@ func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
 		return nil
 	}
 	s.tcpConns[key]++
-	return &countedConn{Conn: conn, release: func() {
+	cc := &countedConn{Conn: conn, rate: s.readRate, tokens: s.readBurst, burst: s.readBurst, last: time.Now()}
+	cc.release = func() {
 		s.tcpMu.Lock()
 		defer s.tcpMu.Unlock()
 		if s.tcpConns[key] <= 1 {
@@ -300,13 +308,40 @@ func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
 		} else {
 			s.tcpConns[key]--
 		}
-	}}
+	}
+	return cc
 }
 
+// countedConn releases its per-address slot on Close and, when rate is set,
+// throttles reads with a token bucket: a client pushing more than a chat
+// needs (huge pastes, junk floods) is slowed to rate bytes/s so it can't
+// burn CPU on decryption. Normal typing and pasting never get near it.
 type countedConn struct {
 	net.Conn
 	once    sync.Once
 	release func()
+
+	rate, burst, tokens float64 // only touched by the single reading goroutine
+	last                time.Time
+}
+
+func (c *countedConn) Read(p []byte) (int, error) {
+	if c.rate == 0 {
+		return c.Conn.Read(p)
+	}
+	if len(p) > int(c.burst) {
+		p = p[:int(c.burst)]
+	}
+	n, err := c.Conn.Read(p)
+	now := time.Now()
+	c.tokens = min(c.burst, c.tokens+now.Sub(c.last).Seconds()*c.rate) - float64(n)
+	c.last = now
+	if c.tokens < 0 {
+		d := time.Duration(-c.tokens / c.rate * float64(time.Second))
+		time.Sleep(d)
+		c.tokens, c.last = 0, now.Add(d)
+	}
+	return n, err
 }
 
 func (c *countedConn) Close() error {

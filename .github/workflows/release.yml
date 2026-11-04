@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  packages: write   # container image on ghcr.io
 
 jobs:
   release:
@@ -79,3 +80,34 @@ jobs:
           Binaries: `ptterm-linux-amd64` (x86_64), `ptterm-linux-arm64` (ARM64 e.g. Oracle Ampere), `ptterm-linux-armv7`. Verify with `SHA256SUMS`.
           EOF
           gh release create "$V" dist/* --target "$GITHUB_SHA" --title "$V" --notes-file notes.md --generate-notes
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.v.outputs.skip != 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.v.outputs.skip != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Image name
+        if: steps.v.outputs.skip != 'true'
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Container image
+        if: steps.v.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ steps.v.outputs.version }}
+            ${{ steps.img.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Anonymous chat room over SSH
+            org.opencontainers.image.licenses=MIT

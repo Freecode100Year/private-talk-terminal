@@ -117,6 +117,7 @@ sudo ptterm-ctl status        # 输出里的 Host key: SHA256:…
 | `PTT_SECURE_URL` / `-secure-url` | `https://hr50.freedom8964.com/` | `/secure` 指向的 HTML Room 创建页；其他站点的邀请会显示警告 |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | 连接限制 |
+| `-read-rate` | 32768 | 每个连接每秒最多发来多少字节，超出会被放慢而不是断开（突发 8 倍；0 = 不限）。正常打字和粘贴远远用不到 |
 | `-msg-rate` / `-msg-burst` / `-max-len` | 1/s / 5 / 500 | 发言限制 |
 | `-idle-timeout` | 1h | 不发言多久后断开（0 = 不断开） |
 | `GOMEMLIMIT` | 内存的 60% | Go 运行时软内存上限 |
@@ -124,3 +125,22 @@ sudo ptterm-ctl status        # 输出里的 Host key: SHA256:…
 其它参数写进 `PTT_ARGS=`。全部参数：`ptterm -h`。
 
 **主机密钥** 在 `/var/lib/ptterm/host_ed25519`，请备份。换了密钥，老用户会看到“主机密钥已变更”警告。
+
+## Docker（可选）
+
+一键脚本（systemd）仍是推荐方式。习惯用容器的话，每次发布都会推送多架构镜像（amd64 / arm64 / armv7）到 GHCR：
+
+```bash
+docker run -d --name ptterm --restart unless-stopped --network host \
+  --read-only --cap-drop ALL --security-opt no-new-privileges --ulimit core=0 \
+  -v ptterm-data:/data -e GOMEMLIMIT=600MiB \
+  ghcr.io/freecode100year/private-talk-terminal:latest
+```
+
+或者用仓库里的 [`deploy/docker-compose.yml`](../deploy/docker-compose.yml)：`docker compose -f deploy/docker-compose.yml up -d`。
+
+- **一定要用 `--network host`。** 用 `-p 2222:2222` 时，Docker 的端口代理（IPv6、某些发行版的 IPv4）会把所有用户的来源都变成同一个地址，大家就共用一份限流额度，一个人刷屏会连累所有人，封禁也会误伤所有人。
+- 镜像基于 distroless，没有 shell，以非 root 用户（uid 65532）运行；主机密钥保存在卷 `ptterm-data` 的 `/data/host_ed25519`，删卷等于换密钥。
+- 配置用环境变量（同上表的 `PTT_*`）或在镜像名后追加参数，例如 `… private-talk-terminal:latest -lang en -max-per-ip 3`。
+- 防火墙、Tor、`ptterm-ctl doctor` 这些由一键脚本处理的事情，容器部署需要自己做。
+- 自己构建：`docker build -t ptterm .`
