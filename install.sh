@@ -32,6 +32,7 @@ VERSION="${PTT_VERSION:-latest}"
 FROM_SOURCE=0
 FIREWALL=1
 TOR=0
+ALT_PORT=""
 PERSIST_BANS=""
 PURGE=0
 ROOMS=""
@@ -77,6 +78,8 @@ Options
   --rooms LIST       public rooms, e.g. "general:Lobby,chinese:中文,tech:技术"
   --domain NAME      domain to show in the final connect command
   --version vX.Y.Z   install a specific release (default: latest)
+  --alt-port N       also listen on port N (e.g. 443, for users behind strict
+                     firewalls); --alt-port off removes it
   --tor              also publish the chat as a Tor onion service, so users can
                      connect without the server ever seeing their IP address
   --persist-bans     keep bans across restarts (stores a hash key on disk; see README)
@@ -116,6 +119,8 @@ parse_args() {
 		--version=*) VERSION=${1#*=}; shift ;;
 		--from-source) FROM_SOURCE=1; shift ;;
 		--tor) TOR=1; shift ;;
+		--alt-port) ALT_PORT=${2:?--alt-port needs a value}; shift 2 ;;
+		--alt-port=*) ALT_PORT=${1#*=}; shift ;;
 		--persist-bans) PERSIST_BANS=on; shift ;;
 		--no-persist-bans) PERSIST_BANS=off; shift ;;
 		--no-firewall) FIREWALL=0; shift ;;
@@ -127,6 +132,9 @@ parse_args() {
 	done
 	if [ -n "$PORT" ]; then
 		[[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "invalid port: $PORT"
+	fi
+	if [ -n "$ALT_PORT" ] && [ "$ALT_PORT" != off ]; then
+		[[ "$ALT_PORT" =~ ^[0-9]+$ ]] && [ "$ALT_PORT" -ge 1 ] && [ "$ALT_PORT" -le 65535 ] || die "invalid --alt-port: $ALT_PORT"
 	fi
 }
 
@@ -180,6 +188,12 @@ port_owner() { # prints the process listening on TCP port $1 ("unknown" if it ca
 		name=ptterm
 	fi
 	echo "${name:-unknown}"
+}
+
+current_alt_port() {
+	if [ -f "$ENV_FILE" ]; then
+		sed -n 's/^PTT_ALT_ADDR=.*:\([0-9]\{1,5\}\)$/\1/p' "$ENV_FILE" | tail -1
+	fi
 }
 
 current_port() {
@@ -369,6 +383,11 @@ EOF
 		set_env PTT_ADDR ":$PORT"
 	fi
 	[ -n "$ROOMS" ] && set_env PTT_ROOMS "$ROOMS"
+	case "$ALT_PORT" in
+	"") ;;
+	off) sed -i '/^PTT_ALT_ADDR=/d' "$ENV_FILE" ;;
+	*) set_env PTT_ALT_ADDR ":$ALT_PORT" ;;
+	esac
 	case "$PERSIST_BANS" in
 	on) set_env PTT_BAN_FILE "$STATE_DIR/bans.json" ;;
 	off)
@@ -410,7 +429,9 @@ add_admin_keys() {
 write_unit() {
 	print_unit >"$UNIT"
 	rm -f "$DROPIN_DIR/low-port.conf"
-	if [ "$PORT" -lt 1024 ]; then
+	local alt
+	alt=$(current_alt_port)
+	if [ "$PORT" -lt 1024 ] || { [ -n "$alt" ] && [ "$alt" -lt 1024 ]; }; then
 		mkdir -p "$DROPIN_DIR"
 		cat >"$DROPIN_DIR/low-port.conf" <<'EOF'
 # Added by install.sh: allow binding a privileged port (< 1024).
@@ -572,6 +593,11 @@ ${C_G}${C_B}Private-Talk Terminal is running.${C_0}  ($("$BIN" -version))
   Connect:        ${C_B}ssh ${portflag}guest@$host${C_0}
   Plain mode:     ssh ${portflag}plain@$host
 EOF
+	local alt
+	alt=$(current_alt_port)
+	if [ -n "$alt" ]; then
+		echo "  Firewalled?    ssh -p $alt guest@$host   (alternate port)"
+	fi
 	local onion
 	onion=$(onion_name)
 	if [ -n "$onion" ]; then
@@ -625,14 +651,23 @@ do_install() {
 		die "port $want is already in use by '$owner'. Choose another with --port N."
 	fi
 
+	if [ -n "$ALT_PORT" ] && [ "$ALT_PORT" != off ]; then
+		[ "$ALT_PORT" = "$want" ] && die "--alt-port must differ from the main port ($want)"
+		owner=$(port_owner "$ALT_PORT")
+		if [ -n "$owner" ] && [ "$owner" != ptterm ]; then
+			die "port $ALT_PORT is already in use by '$owner' (a web server on 443?). Pick another --alt-port, or skip it."
+		fi
+	fi
+
 	get_binary
 	install -m 0755 "$TMP/ptterm" "$BIN.new"
 	mv -f "$BIN.new" "$BIN"
 	ok "Installed $BIN ($("$BIN" -version))"
 
 	mkdir -p "$CONF_DIR"
-	local old_port
+	local old_port old_alt
 	old_port=$(current_port || true)
+	old_alt=$(current_alt_port || true)
 	write_env
 	add_admin_keys
 	write_unit
@@ -641,6 +676,12 @@ do_install() {
 	open_firewall "$PORT"
 	if [ -n "$old_port" ] && [ "$old_port" != "$PORT" ]; then
 		close_firewall "$old_port"
+	fi
+	local alt
+	alt=$(current_alt_port)
+	[ -n "$alt" ] && open_firewall "$alt"
+	if [ -n "$old_alt" ] && [ "$old_alt" != "$alt" ]; then
+		close_firewall "$old_alt"
 	fi
 
 	systemctl enable ptterm >/dev/null 2>&1
@@ -676,6 +717,9 @@ do_uninstall() {
 	systemctl daemon-reload 2>/dev/null || true
 	rm -f "$BIN"
 	[ -n "$p" ] && close_firewall "$p"
+	local alt
+	alt=$(current_alt_port || true)
+	[ -n "$alt" ] && close_firewall "$alt"
 	remove_tor
 	[ "$(readlink -f "${BASH_SOURCE[0]:-}")" = "$CTL" ] || rm -f "$CTL"
 	[ $PURGE = 1 ] && rm -f "$CTL"
@@ -694,10 +738,13 @@ do_status() {
 	fi
 	echo "Version:  $("$BIN" -version)"
 	echo "Service:  $(systemctl is-active ptterm 2>/dev/null || true) ($(systemctl is-enabled ptterm 2>/dev/null || true))"
-	echo "Port:     $(current_port || echo 2222)"
+	echo "Port:     $(current_port || echo 2222)$( [ -n "$(current_alt_port)" ] && echo " (also $(current_alt_port))")"
 	local onion
 	onion=$(onion_name)
 	if [ -n "$onion" ]; then echo "Onion:    $onion (Tor)"; fi
+	if command -v ssh-keygen >/dev/null && [ -f "$STATE_DIR/host_ed25519" ]; then
+		echo "Host key: $(ssh-keygen -lf "$STATE_DIR/host_ed25519" 2>/dev/null | awk '{print $2}')  (publish this so users can verify it)"
+	fi
 	local h
 	h=$(sed -n 's/^PTT_HEALTH_ADDR=//p' "$ENV_FILE" 2>/dev/null | tail -1)
 	if [ -n "$h" ] && command -v curl >/dev/null; then

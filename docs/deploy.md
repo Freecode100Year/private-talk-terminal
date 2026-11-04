@@ -43,6 +43,7 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 | `--rooms LIST` | 公共频道，如 `"general:大厅,chinese:中文,tech:技术"`（第一个是大厅） |
 | `--domain NAME` | 只用于最后显示的连接命令 |
 | `--version vX.Y.Z` | 安装指定版本 |
+| `--alt-port N` | 同时监听第二个端口，例如 `443`：公司、学校、酒店网络常只放行 80/443。机器上已有网站占用 443 时用不了，安装器会检查并提示；`--alt-port off` 关闭 |
 | `--tor` | 同时发布为 Tor 洋葱服务（自动安装 Tor），用户可以不暴露 IP 连接，见[安全与匿名性](security.md) |
 | `--persist-bans` | 封禁在重启和升级后依然有效（默认只存在内存里）；`--no-persist-bans` 关闭。隐私上的取舍见[安全与匿名性](security.md) |
 | `--from-source` | 从源码编译（会临时下载 Go，结束后删除） |
@@ -54,6 +55,16 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 
 - 云厂商的防火墙（Oracle VCN 安全列表、AWS/GCP 安全组等）放行 TCP 端口。
 - 域名 A/AAAA 记录指向 VPS。在 Cloudflare 上必须设为 **DNS only（灰云）**，橙云代理不转发 SSH。
+
+## 公布主机指纹
+
+用户第一次连接时，SSH 会显示服务器的主机密钥指纹。请把指纹公布在用户能看到的地方（例如 README、网站），用户核对一致才能确认没有被冒充：
+
+```bash
+sudo ptterm-ctl status        # 输出里的 Host key: SHA256:…
+```
+
+主机密钥在 `/var/lib/ptterm/host_ed25519`，务必备份。换了密钥，指纹就会变，老用户会看到警告。
 
 ## 管理员
 

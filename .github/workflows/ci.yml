@@ -120,6 +120,17 @@ jobs:
           ss -ltn > /tmp/ss.txt
           grep -q '127.0.0.1:2224 ' /tmp/ss.txt
 
+      - name: Alternate port 443
+        run: |
+          exec > >(tee -a /tmp/ci-logs/alt-port.log) 2>&1
+          set -x
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port 443
+          out=$( (sleep 1; echo /quit) | ssh -T -p 443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
+          echo "$out" | grep -q "Welcome"
+          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port off
+          ss -ltn > /tmp/ss.txt
+          if grep -q ':443 ' /tmp/ss.txt; then echo "443 still open"; exit 1; fi
+
       - name: Persistent bans
         run: |
           exec > >(tee -a /tmp/ci-logs/persist-bans.log) 2>&1

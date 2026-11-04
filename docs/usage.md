@@ -8,6 +8,7 @@
 | --- | --- |
 | 完整界面（推荐） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@HOST` |
 | 纯文本模式（老终端 / CMD 乱码时） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
+| 被防火墙拦住（部署者开了备用端口时） | `ssh -o StrictHostKeyChecking=accept-new -p 443 guest@HOST` |
 | 无终端 / 脚本 / 机器人 | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
 | 通过 Tor（服务器看不到你的 IP） | `torsocks ssh guest@<onion地址>.onion`（见下文） |
 
@@ -24,6 +25,22 @@ Host term.freedom8964.com
 ```
 
 之后可直接运行 `ssh -p 2222 guest@term.freedom8964.com`。首次自动保存密钥，后续仍会拒绝密钥变化。
+
+### 缩短成 `ssh chat`
+
+经常来的话，把下面几行加进同一个配置文件，以后输入 `ssh chat` 就能进：
+
+```sshconfig
+Host chat
+    HostName term.freedom8964.com
+    Port 2222
+    User guest
+    StrictHostKeyChecking accept-new
+```
+
+### 核对主机指纹
+
+第一次连接时 SSH 会显示一行 `ED25519 key fingerprint is SHA256:…`。把它和部署者公布的指纹对一下，一致才说明连上的是真的服务器，没有被中间人冒充。之后 SSH 会记住它，指纹一旦变化就会拒绝连接并警告。
 
 ## iPhone / iPad（iOS）
 

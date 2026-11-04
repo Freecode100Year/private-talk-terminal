@@ -47,11 +47,12 @@ type Options struct {
 	IdleTimeout   time.Duration // disconnect after this long without traffic
 	MaxTimeout    time.Duration // absolute session limit (0 = none)
 	Banner        string
-	MaxTCPPerIP   int    // raw TCP connections per address, incl. unauthenticated (default 8)
-	AdminUser     string // username that authenticates with an admin key (default "admin")
-	OnionAddr     string // optional second listener for a Tor onion service (e.g. 127.0.0.1:2224)
-	OnionMaxTCP   int    // TCP connections allowed through the onion listener (default 400)
-	BanFile       string // optional: persist bans here (see bans.go for the privacy trade-off)
+	MaxTCPPerIP   int      // raw TCP connections per address, incl. unauthenticated (default 8)
+	AdminUser     string   // username that authenticates with an admin key (default "admin")
+	OnionAddr     string   // optional second listener for a Tor onion service (e.g. 127.0.0.1:2224)
+	OnionMaxTCP   int      // TCP connections allowed through the onion listener (default 400)
+	BanFile       string   // optional: persist bans here (see bans.go for the privacy trade-off)
+	AltAddrs      []string // extra listen addresses, e.g. ":443" for networks that block other ports
 }
 
 // OnionKey is the shared rate-limit key for everyone arriving via Tor: the
@@ -78,12 +79,13 @@ type Server struct {
 	onionAddr string
 	onionMax  int
 	banFile   string
+	altAddrs  []string
 }
 
 // New builds the SSH server around hub.
 func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	s := &Server{hub: hub, log: log, salt: make([]byte, 32), tcpConns: map[string]int{}, tcpMax: opt.MaxTCPPerIP,
-		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP}
+		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs}
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
 	}
@@ -341,12 +343,24 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
 func (s *Server) Run(ctx context.Context) error {
-	errc := make(chan error, 2)
+	errc := make(chan error, 2+len(s.altAddrs))
 	go func() {
 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 			errc <- err
 		}
 	}()
+	for _, addr := range s.altAddrs {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("alternate listener %s: %w", addr, err)
+		}
+		s.log.Info("alternate listener", "addr", addr)
+		go func() {
+			if err := s.Serve(l); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
+				errc <- err
+			}
+		}()
+	}
 	if s.onionAddr != "" {
 		l, err := net.Listen("tcp", s.onionAddr)
 		if err != nil {

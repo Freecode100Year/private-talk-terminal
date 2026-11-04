@@ -37,6 +37,8 @@ func main() {
 		connPerMin  = flag.Int("conn-per-min", 10, "new sessions per address per minute")
 		tcpPerIP    = flag.Int("max-tcp-per-ip", 8, "raw TCP connections per address, including unauthenticated ones")
 		adminUser   = flag.String("admin-user", envOr("PTT_ADMIN_USER", "admin"), "username admins log in with (their key is checked); everyone else never sends a key")
+		altAddr     = flag.String("alt-addr", envOr("PTT_ALT_ADDR", ""), "extra listen addresses, comma separated, e.g. :443 for users behind strict firewalls")
+		quietAbove  = flag.Int("quiet-above", 20, "rooms with more members than this show a join/leave summary every 30s instead of every line (-1 = never)")
 		secureURL   = flag.String("secure-url", envOr("PTT_SECURE_URL", "https://hr50.freedom8964.com/"), "HTML Room creator that /secure points to (end-to-end encrypted rooms)")
 		banFile     = flag.String("ban-file", envOr("PTT_BAN_FILE", ""), "persist bans across restarts in this file (opt-in; see README for the privacy trade-off)")
 		onionAddr   = flag.String("onion-addr", envOr("PTT_ONION_ADDR", ""), "extra listener for a Tor onion service, e.g. 127.0.0.1:2224 (Tor users share one rate-limit bucket)")
@@ -96,6 +98,7 @@ func main() {
 		PersistBans:   *banFile != "",
 		TorEnabled:    *onionAddr != "",
 		SecureURL:     *secureURL,
+		QuietAbove:    *quietAbove,
 	})
 
 	srv, err := server.New(hub, server.Options{
@@ -107,6 +110,7 @@ func main() {
 		AdminUser:     *adminUser,
 		OnionAddr:     *onionAddr,
 		BanFile:       *banFile,
+		AltAddrs:      splitList(*altAddr),
 	}, log)
 	if err != nil {
 		log.Error("could not create server", "err", err)
@@ -136,7 +140,7 @@ func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	clean := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		if redactKeys[strings.ToLower(a.Key)] && !strings.HasPrefix(r.Message, "Private-Talk Terminal listening") &&
-			r.Message != "health endpoint" && r.Message != "onion listener" {
+			r.Message != "health endpoint" && r.Message != "onion listener" && r.Message != "alternate listener" {
 			a = slog.String(a.Key, "[redacted]")
 		}
 		clean.AddAttrs(a)
@@ -182,6 +186,16 @@ func serveHealth(ctx context.Context, addr string, hub *chat.Hub, log *slog.Logg
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("health endpoint failed", "err", err)
 	}
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envOr(k, def string) string {

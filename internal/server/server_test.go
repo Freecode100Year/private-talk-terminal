@@ -270,3 +270,20 @@ func TestEphemeralKeysByDefault(t *testing.T) {
 		t.Fatal("address keys are stable across restarts without -ban-file")
 	}
 }
+
+func TestAlternateListener(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	alt := l.Addr().String()
+	l.Close()
+	startServerWith(t, func(o *Options) { o.AltAddrs = []string{alt} })
+	for i := 0; i < 50; i++ {
+		if c, err := net.Dial("tcp", alt); err == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	in, out := plainSession(t, dial(t, alt))
+	waitFor(t, out, "Now in #general")
+	_ = in
+}
