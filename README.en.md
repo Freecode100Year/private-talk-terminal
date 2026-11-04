@@ -66,6 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 
 Manage it with `sudo vivant-ctl status | upgrade | uninstall`. If people can't connect, run `sudo vivant-ctl doctor`: it checks everything and tells you how to fix it. Remember to allow TCP 2222 in your cloud provider's firewall, and on Cloudflare set the DNS record to DNS only (grey cloud). Docker works too, see [Deployment and configuration](docs/deploy.en.md#docker-optional).
 
+**Server can't reach GitHub:** use the offline bundle `vivant-<version>-linux-offline.tar.gz` from the release page, see [Offline install](docs/deploy.en.md#offline-install-server-cant-reach-github). For a temporary server on Windows / macOS (testing, LAN), the release page has those binaries too, see [Deployment and configuration](docs/deploy.en.md#windows--macos).
+
 **Upgrading from Private-Talk Terminal:** VIVANT used to be called Private-Talk Terminal (`ptterm`). Run the command above once on the old server and it migrates automatically, keeping the host key, configuration, bans and onion address. See [Deployment and configuration](docs/deploy.en.md#migrating-from-private-talk-terminal).
 
 A 1-core, 1 GB VPS handles about 2000 people online at once. Installer options, admins and settings: [Deployment and configuration](docs/deploy.en.md).
@@ -86,6 +88,7 @@ Improvements chosen after studying similar projects (ssh-chat, devzat, SoftRoom,
 - [x] **External monitoring, passphrase design rule**: documented (from devzat, ssh-chat, sshoosh)
 - [x] **Hardening after a security review**: modern SSH algorithms only, invisible and tag characters stripped (with a fuzz test), global TCP cap, fresh ban key when no ban is active
 - [x] **Renamed to VIVANT**: old servers migrate by running the installer
+- [x] **Offline install bundle**: for servers that can't reach GitHub; plus Windows / macOS binaries for testing and LANs
 
 ## Documentation
 

@@ -12,7 +12,7 @@ test:
 
 lint:
 	go vet ./...
-	shellcheck -S warning install.sh
+	shellcheck -S warning install.sh deploy/make-offline-bundle.sh
 	bash install.sh --print-unit | diff -u deploy/vivant.service -
 
 run: build
@@ -23,7 +23,13 @@ dist:
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -o dist/vivant-linux-amd64 .
 	GOOS=linux GOARCH=arm64 $(GOBUILD) -o dist/vivant-linux-arm64 .
 	GOOS=linux GOARCH=arm GOARM=7 $(GOBUILD) -o dist/vivant-linux-armv7 .
-	cd dist && sha256sum vivant-linux-* > SHA256SUMS
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o dist/vivant-macos-amd64 .
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o dist/vivant-macos-arm64 .
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -o dist/vivant-windows-amd64.exe .
+	GOOS=windows GOARCH=arm64 $(GOBUILD) -o dist/vivant-windows-arm64.exe .
+	cp install.sh dist/
+	deploy/make-offline-bundle.sh dist $(VERSION)
+	cd dist && sha256sum vivant-* install.sh > SHA256SUMS
 
 # Load test against a local server with relaxed limits.
 bench: build

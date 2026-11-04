@@ -42,7 +42,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -o /dev/null .
 
       - name: Shellcheck installer
-        run: shellcheck -S warning install.sh
+        run: shellcheck -S warning install.sh deploy/make-offline-bundle.sh
 
       - name: Unit file in sync with installer
         run: bash install.sh --print-unit | diff -u deploy/vivant.service -
@@ -71,6 +71,8 @@ jobs:
           set -x
           mkdir -p /tmp/rel
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=ci-${GITHUB_SHA::7}" -o /tmp/rel/vivant-linux-amd64 .
+          CGO_ENABLED=0 GOARCH=arm64 go build -trimpath -o /tmp/rel/vivant-linux-arm64 .
+          CGO_ENABLED=0 GOARCH=arm GOARM=7 go build -trimpath -o /tmp/rel/vivant-linux-armv7 .
           (cd /tmp/rel && sha256sum vivant-linux-* > SHA256SUMS)
           (cd /tmp/rel && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
           sleep 1
@@ -205,6 +207,29 @@ jobs:
           test ! -e /var/lib/tor/vivant
           if systemctl is-active --quiet vivant; then echo "still running"; exit 1; fi
           test ! -e /usr/local/bin/vivant
+
+      - name: Offline install from the bundle
+        run: |
+          exec > >(tee -a /tmp/ci-logs/offline.log) 2>&1
+          set -x
+          cp install.sh /tmp/rel/
+          bundle=$(deploy/make-offline-bundle.sh /tmp/rel ci)
+          mkdir -p /tmp/off && tar -C /tmp/off -xzf "$bundle"
+          cd /tmp/off/vivant-ci-linux-offline
+          # any download attempt would go to a dead proxy and fail the install
+          sudo env https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 \
+            ./install.sh > /tmp/off.txt 2>&1 || { cat /tmp/off.txt; exit 1; }
+          cat /tmp/off.txt
+          grep -q "离线安装" /tmp/off.txt
+          systemctl is-active --quiet vivant
+          out=$( (sleep 1; echo /quit) | ssh -T -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
+          echo "$out" | grep -q "Welcome"
+          test -x /usr/local/sbin/vivant-ctl
+          # a tampered binary is refused
+          echo x | sudo tee -a vivant-linux-amd64 >/dev/null
+          if sudo ./install.sh > /tmp/bad.txt 2>&1; then cat /tmp/bad.txt; echo "tampered binary installed"; exit 1; fi
+          grep -q "checksum mismatch" /tmp/bad.txt
+          sudo vivant-ctl uninstall --purge
 
       - name: Diagnostics
         if: failure()

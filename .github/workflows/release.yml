@@ -62,8 +62,14 @@ jobs:
           # same binaries under the pre-rename names, so "ptterm-ctl upgrade" on
           # servers that haven't migrated yet keeps working
           for a in amd64 arm64 armv7; do cp dist/vivant-linux-$a dist/ptterm-linux-$a; done
+          # Windows / macOS: plain binaries for local testing and LANs (no installer)
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $FLAGS -o dist/vivant-macos-amd64 .
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build $FLAGS -o dist/vivant-macos-arm64 .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $FLAGS -o dist/vivant-windows-amd64.exe .
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build $FLAGS -o dist/vivant-windows-arm64.exe .
           cp install.sh dist/
-          (cd dist && sha256sum vivant-linux-* ptterm-linux-* install.sh > SHA256SUMS && cat SHA256SUMS)
+          deploy/make-offline-bundle.sh dist "$V"
+          (cd dist && sha256sum vivant-* ptterm-linux-* install.sh > SHA256SUMS && cat SHA256SUMS)
           ./dist/vivant-linux-amd64 -version
 
       - name: Publish
@@ -83,6 +89,10 @@ jobs:
 
           从 Private-Talk Terminal（ptterm）迁移：运行上面的一键命令即可，主机密钥、配置、封禁、洋葱地址都会保留。
           Migrating from Private-Talk Terminal (ptterm): run the command above; host key, config, bans and onion address are kept.
+
+          离线安装（服务器连不上 GitHub）· Offline install (server can't reach GitHub): download `vivant-<version>-linux-offline.tar.gz`, copy it to the server, then `tar xzf … && cd … && sudo ./install.sh`.
+
+          Windows / macOS：`vivant-windows-*.exe`、`vivant-macos-*` 只适合本机测试或局域网，没有安装器、沙箱和开机自启 · for local testing or a LAN only — no installer, sandbox or autostart.
 
           程序 Binaries: `vivant-linux-amd64` (x86_64), `vivant-linux-arm64` (ARM64, e.g. Oracle Ampere), `vivant-linux-armv7`；用 `SHA256SUMS` 校验 · verify with `SHA256SUMS`. (`ptterm-linux-*` are the same files under the old names.)
           EOF

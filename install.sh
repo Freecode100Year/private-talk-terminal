@@ -40,6 +40,7 @@ ROOMS=""
 DOMAIN=""
 ADMIN_KEYS=()
 DOWNLOAD_BASE="${VIVANT_DOWNLOAD_BASE:-${PTT_DOWNLOAD_BASE:-}}"
+OFFLINE=0
 
 # ---------------------------------------------------------------- output ----
 if [ -t 1 ]; then
@@ -89,6 +90,11 @@ ${C_B}VIVANT 安装器 · installer${C_0}
   --persist-bans     重启后保留封禁（会把哈希密钥存盘，见文档）· keep bans across restarts (stores a hash key on disk)
   --no-persist-bans  关闭上一项（默认封禁只在内存）· turn that off again (default: bans live in memory only)
   --from-source      从源码编译，不下载发布版 · build from source instead of downloading a release
+
+离线安装 Offline install
+  在离线包解压出的目录里运行 ./install.sh，会直接使用同目录的程序（校验 SHA256），不联网。
+  Run ./install.sh from the unpacked vivant-<version>-linux-offline.tar.gz: it uses the binary
+  next to it (SHA256-verified) and needs no network. (--tor and --admin-key github:… still do.)
   --no-firewall      不动 ufw/firewalld/iptables · don't touch ufw/firewalld/iptables
   --purge            配合 uninstall：连配置、主机密钥、管理员一起删除 · with uninstall: also delete config, host key and admins
 
@@ -272,10 +278,30 @@ build_from_source() {
 	ok "已从源码编译 · Built from source"
 }
 
+# local_release uses the binary that sits next to this script (the offline
+# bundle vivant-<version>-linux-offline.tar.gz), verified like a download.
+# Returns 1 when there is none, e.g. when the script was piped from curl.
+local_release() {
+	local src="${BASH_SOURCE[0]:-}" dir asset=vivant-linux-$ARCH
+	[ -n "$src" ] && [ -f "$src" ] || return 1
+	dir=$(cd "$(dirname "$src")" && pwd)
+	[ "$dir" != "$(dirname "$CTL")" ] || return 1 # vivant-ctl itself: go online
+	[ -f "$dir/$asset" ] || return 1
+	[ -f "$dir/SHA256SUMS" ] || die "$dir/$asset 旁边缺少 SHA256SUMS，无法校验 · SHA256SUMS missing next to $asset, can't verify it"
+	info "使用本地文件（离线安装）· Using local file (offline install): $dir/$asset"
+	(cd "$dir" && grep " $asset\$" SHA256SUMS | sha256sum -c --quiet -) ||
+		die "校验和不匹配，拒绝安装 · checksum mismatch for $asset — refusing to install"
+	cp "$dir/$asset" "$TMP/vivant"
+	ok "校验通过 · Checksum verified"
+	OFFLINE=1
+}
+
 get_binary() {
 	TMP=$(mktemp -d)
 	if [ $FROM_SOURCE = 1 ]; then
 		build_from_source
+	elif local_release; then
+		:
 	elif ! download_release; then
 		warn "下载发布版失败，改为从源码编译 · release download failed — building from source instead"
 		build_from_source
@@ -579,8 +605,8 @@ onion_name() {
 
 # --------------------------------------------------------------- report -----
 public_ip() {
-	local ip
-	ip=$(fetch_stdout https://api.ipify.org 2>/dev/null || true)
+	local ip=""
+	[ $OFFLINE = 1 ] || ip=$(fetch_stdout https://api.ipify.org 2>/dev/null || true)
 	[[ "$ip" =~ ^[0-9.]+$ ]] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 	echo "${ip:-YOUR_SERVER_IP}"
 }
@@ -642,7 +668,7 @@ install_ctl() {
 	local src="${BASH_SOURCE[0]:-}"
 	if [ -n "$src" ] && [ -f "$src" ] && grep -q "VIVANT — one-click installer" "$src" 2>/dev/null; then
 		[ "$(readlink -f "$src")" = "$CTL" ] || install -m 0755 "$src" "$CTL"
-	elif fetch "$RAW_URL" "$TMP/ctl.sh" 2>/dev/null && grep -q "one-click installer" "$TMP/ctl.sh"; then
+	elif [ $OFFLINE = 0 ] && fetch "$RAW_URL" "$TMP/ctl.sh" 2>/dev/null && grep -q "one-click installer" "$TMP/ctl.sh"; then
 		install -m 0755 "$TMP/ctl.sh" "$CTL"
 	else
 		return 0

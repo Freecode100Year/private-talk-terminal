@@ -59,6 +59,30 @@ sudo vivant-ctl uninstall --purge # 彻底删除
 - 云厂商的防火墙（Oracle VCN 安全列表、AWS/GCP 安全组等）放行 TCP 端口。
 - 域名 A/AAAA 记录指向 VPS。在 Cloudflare 上必须设为 **DNS only（灰云）**，橙云代理不转发 SSH。
 
+## 离线安装（服务器连不上 GitHub）
+
+每次发布都附带离线包 `vivant-<版本>-linux-offline.tar.gz`，里面有三种架构的程序、安装脚本和校验文件。在能上网的电脑上从 [Releases](https://github.com/Freecode100Year/vivant/releases) 下载，传到服务器：
+
+```bash
+scp vivant-v0.9.2-linux-offline.tar.gz root@服务器:
+# 在服务器上
+tar xzf vivant-v0.9.2-linux-offline.tar.gz && cd vivant-v0.9.2-linux-offline
+sudo ./install.sh                     # 参数和在线安装一样
+```
+
+安装脚本发现同目录里有程序，就直接用它（先按 `SHA256SUMS` 校验，不对就拒绝安装），全程不联网。升级时下载新的离线包再运行一次即可，配置和主机密钥会保留。仍然需要联网的只有：`--tor`（要从软件源装 tor，已装好则不用）和 `--admin-key github:用户名`（离线时请直接给公钥文件）。
+
+## Windows / macOS
+
+服务器建议用 Linux。想在 Windows 或 Mac 上临时跑一个（本机测试、局域网里和朋友聊），发布页里有 `vivant-windows-amd64.exe`、`vivant-windows-arm64.exe`、`vivant-macos-amd64`、`vivant-macos-arm64`，下载后直接运行：
+
+```bash
+./vivant-macos-arm64 -addr :2222          # macOS（Apple 芯片）；首次运行需在「系统设置 → 隐私与安全性」里允许
+vivant-windows-amd64.exe -addr :2222      # Windows；防火墙弹窗时允许专用网络
+```
+
+然后其他人用 `ssh -p 2222 guest@你的局域网IP` 连接。这种方式没有安装器、没有 systemd 沙箱、不会开机自启，主机密钥保存在当前目录的 `data/` 里，只适合测试和局域网，不建议对公网开放。
+
 ## 从 Private-Talk Terminal 迁移
 
 VIVANT 以前叫 Private-Talk Terminal（程序名 `ptterm`）。已经部署了旧版的服务器，运行一次上面的一键安装命令即可自动迁移：

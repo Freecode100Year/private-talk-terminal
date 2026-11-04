@@ -59,6 +59,30 @@ Restricted network: point `VIVANT_DOWNLOAD_BASE=<mirror>` at a directory with `v
 - Allow the TCP port in your cloud provider's firewall (Oracle VCN security list, AWS/GCP security groups, …).
 - Point the domain's A/AAAA record at the VPS. On Cloudflare it must be **DNS only (grey cloud)**; the orange-cloud proxy doesn't forward SSH.
 
+## Offline install (server can't reach GitHub)
+
+Every release includes an offline bundle, `vivant-<version>-linux-offline.tar.gz`, with the binaries for all three architectures, the installer and checksums. Download it from [Releases](https://github.com/Freecode100Year/vivant/releases) on a machine with internet access and copy it to the server:
+
+```bash
+scp vivant-v0.9.2-linux-offline.tar.gz root@SERVER:
+# on the server
+tar xzf vivant-v0.9.2-linux-offline.tar.gz && cd vivant-v0.9.2-linux-offline
+sudo ./install.sh                     # same options as the online installer
+```
+
+When the installer finds the binary next to it, it uses that (verified against `SHA256SUMS` first; a mismatch is refused) and never touches the network. To upgrade, get the new bundle and run it again; configuration and host key are kept. Only two options still need the network: `--tor` (installs tor from the package repositories, unless it's already installed) and `--admin-key github:USERNAME` (offline, pass a key file instead).
+
+## Windows / macOS
+
+Linux is recommended for servers. To run one on Windows or a Mac for a while (local testing, a chat with friends on your LAN), the release page has `vivant-windows-amd64.exe`, `vivant-windows-arm64.exe`, `vivant-macos-amd64` and `vivant-macos-arm64`. Download and run:
+
+```bash
+./vivant-macos-arm64 -addr :2222          # macOS (Apple silicon); allow it under System Settings → Privacy & Security the first time
+vivant-windows-amd64.exe -addr :2222      # Windows; allow private networks when the firewall asks
+```
+
+Others connect with `ssh -p 2222 guest@your-LAN-IP`. There's no installer, no systemd sandbox and no autostart; the host key is kept in `data/` in the current directory. Fine for testing and LANs — not recommended for the public internet.
+
 ## Migrating from Private-Talk Terminal
 
 VIVANT used to be called Private-Talk Terminal (binary `ptterm`). On a server running the old version, run the one-line install command above once and it migrates automatically:
