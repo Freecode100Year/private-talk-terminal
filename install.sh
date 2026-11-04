@@ -69,6 +69,8 @@ Commands
   upgrade            install the newest release, keep configuration
   uninstall          remove service and binary (keeps config + host key)
   status             show service state and online counts
+  doctor             check service, ports, firewall, DNS/Cloudflare, host key
+                     and updates, and say how to fix what's wrong
   help               this text
 
 Options
@@ -76,7 +78,8 @@ Options
   --admin-key KEY    grant admin rights; KEY is "ssh-ed25519 AAAA...",
                      a path to a .pub file, or github:USERNAME. Repeatable.
   --rooms LIST       public rooms, e.g. "general:Lobby,chinese:中文,tech:技术"
-  --domain NAME      domain to show in the final connect command
+  --domain NAME      domain users connect to (shown in the connect command,
+                     remembered for "doctor" DNS checks)
   --version vX.Y.Z   install a specific release (default: latest)
   --alt-port N       also listen on port N (e.g. 443, for users behind strict
                      firewalls); --alt-port off removes it
@@ -99,7 +102,7 @@ EOF
 parse_args() {
 	if [ $# -gt 0 ]; then
 		case "$1" in
-		install | upgrade | uninstall | status | help)
+		install | upgrade | uninstall | status | doctor | help)
 			CMD=$1
 			shift
 			;;
@@ -386,6 +389,8 @@ EOF
 		set_env PTT_ADDR ":$PORT"
 	fi
 	[ -n "$ROOMS" ] && set_env PTT_ROOMS "$ROOMS"
+	# not read by ptterm; lets "ptterm-ctl doctor" check DNS for this name
+	[ -n "$DOMAIN" ] && set_env PTT_DOMAIN "$DOMAIN"
 	case "$ALT_PORT" in
 	"") ;;
 	off) sed -i '/^PTT_ALT_ADDR=/d' "$ENV_FILE" ;;
@@ -756,6 +761,225 @@ do_status() {
 	journalctl -u ptterm -n 5 --no-pager 2>/dev/null || true
 }
 
+# --------------------------------------------------------------- doctor -----
+D_FAIL=0 D_WARN=0
+d_ok() { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
+d_warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*"; D_WARN=$((D_WARN + 1)); }
+d_fail() { printf '  %s✗%s %s\n' "$C_R" "$C_0" "$*"; D_FAIL=$((D_FAIL + 1)); }
+d_fix() { printf '      → %s\n' "$*"; }
+d_head() { printf '\n%s%s%s\n' "$C_B" "$*" "$C_0"; }
+
+env_get() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -1; }
+
+ip4_num() { # dotted quad -> integer
+	local IFS=. a b c d
+	read -r a b c d <<<"$1"
+	echo $(((a << 24) + (b << 16) + (c << 8) + d))
+}
+
+is_cloudflare_ip() { # Cloudflare proxy ranges (https://www.cloudflare.com/ips/)
+	local ip=$1 net len n m
+	case "$ip" in
+	2606:4700:* | 2400:cb00:* | 2803:f800:* | 2405:b500:* | 2405:8100:* | 2a06:98c0:* | 2c0f:f248:*) return 0 ;;
+	*:*) return 1 ;;
+	esac
+	n=$(ip4_num "$ip")
+	for net in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 \
+		190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+		104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do
+		len=${net#*/}
+		m=$(((0xFFFFFFFF << (32 - len)) & 0xFFFFFFFF))
+		[ $((n & m)) -eq $(($(ip4_num "${net%/*}") & m)) ] && return 0
+	done
+	return 1
+}
+
+firewall_allows() { # firewall_allows PORT — 0 allowed, 1 blocked, 2 unknown/no firewall
+	local p=$1
+	if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+		ufw status 2>/dev/null | grep -Eq "^$p(/tcp)?[[:space:]].*ALLOW" && return 0
+		return 1
+	fi
+	if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+		firewall-cmd --list-ports 2>/dev/null | grep -qw "$p/tcp" && return 0
+		[ "$p" = 22 ] && firewall-cmd --list-services 2>/dev/null | grep -qw ssh && return 0
+		return 1
+	fi
+	if command -v iptables >/dev/null && iptables -S INPUT 2>/dev/null | grep -Eq -- '-P INPUT DROP|-j (REJECT|DROP)'; then
+		iptables -S INPUT 2>/dev/null | grep -Eq -- "--dport $p .*-j ACCEPT" && return 0
+		return 1
+	fi
+	return 2
+}
+
+do_doctor() {
+	local port alt onion_addr domain health v latest p r
+	echo "${C_B}Private-Talk Terminal doctor${C_0}"
+
+	d_head "Service"
+	if ! [ -x "$BIN" ]; then
+		d_fail "not installed ($BIN missing)"
+		d_fix "sudo bash install.sh"
+		echo
+		exit 1
+	fi
+	v=$("$BIN" -version 2>/dev/null | awk '{print $2}')
+	d_ok "binary $BIN ($v)"
+	if systemctl is-active --quiet ptterm 2>/dev/null; then
+		r=$(systemctl show -p NRestarts --value ptterm 2>/dev/null || true)
+		if [ "${r:-0}" -gt 0 ]; then
+			d_warn "service running, but it has restarted $r time(s)"
+			d_fix "journalctl -u ptterm -n 50 --no-pager"
+		else
+			d_ok "service running"
+		fi
+	else
+		d_fail "service is $(systemctl is-active ptterm 2>/dev/null || echo unknown)"
+		d_fix "sudo systemctl restart ptterm; journalctl -u ptterm -n 50 --no-pager"
+	fi
+	systemctl is-enabled --quiet ptterm 2>/dev/null && d_ok "starts on boot" || {
+		d_warn "not enabled at boot"
+		d_fix "sudo systemctl enable ptterm"
+	}
+	health=$(env_get PTT_HEALTH_ADDR)
+	if [ -n "$health" ] && command -v curl >/dev/null; then
+		if r=$(curl -fsS --max-time 3 "http://$health/healthz" 2>/dev/null); then
+			d_ok "health endpoint: $r"
+		else
+			d_warn "health endpoint $health not answering"
+		fi
+	fi
+
+	d_head "Ports and firewall"
+	port=$(current_port)
+	port=${port:-2222}
+	alt=$(current_alt_port)
+	for p in $port $alt; do
+		if port_open "$p"; then
+			r=$(port_owner "$p")
+			if [ "$r" = ptterm ] || [ "$r" = unknown ]; then
+				d_ok "listening on TCP $p"
+			else
+				d_fail "TCP $p is held by $r, not ptterm"
+				d_fix "pick another port: sudo ptterm-ctl install --port N"
+			fi
+		else
+			d_fail "nothing listening on TCP $p"
+			d_fix "journalctl -u ptterm -n 50 --no-pager"
+		fi
+		r=0
+		firewall_allows "$p" || r=$?
+		case $r in
+		0) d_ok "local firewall allows $p/tcp" ;;
+		1)
+			d_fail "local firewall blocks $p/tcp"
+			d_fix "sudo ptterm-ctl install   (reopens it), or allow $p/tcp yourself"
+			;;
+		*) d_ok "no blocking local firewall found for $p/tcp" ;;
+		esac
+	done
+	if [ "$port" = 22 ] || [ "$alt" = 22 ]; then
+		d_warn "the chat uses port 22 — make sure your own admin SSH runs on another port"
+	fi
+	echo "      Cloud firewalls (security groups, Oracle VCN lists…) can't be seen from here:"
+	echo "      test from another network:  ssh -p $port guest@<this server>"
+
+	onion_addr=$(env_get PTT_ONION_ADDR)
+	if [ -n "$onion_addr" ]; then
+		d_head "Tor"
+		if systemctl is-active --quiet tor@default 2>/dev/null || systemctl is-active --quiet tor 2>/dev/null; then
+			d_ok "tor running"
+		else
+			d_fail "tor is not running"
+			d_fix "sudo systemctl restart tor; journalctl -u tor@default -n 30"
+		fi
+		if [ -n "$(onion_name)" ]; then d_ok "onion address $(onion_name)"; else
+			d_fail "no onion address yet"
+			d_fix "sudo ptterm-ctl install --tor"
+		fi
+		port_open "${onion_addr##*:}" && d_ok "local onion listener ${onion_addr}" || d_fail "nothing listening on ${onion_addr}"
+	fi
+
+	d_head "DNS"
+	domain=${DOMAIN:-$(env_get PTT_DOMAIN)}
+	if [ -z "$domain" ]; then
+		echo "      no domain known — run: ptterm-ctl doctor --domain chat.example.com"
+	elif ! command -v getent >/dev/null; then
+		d_warn "getent missing, can't resolve $domain"
+	else
+		local addrs mine cf=0 match=0 a
+		addrs=$(getent ahosts "$domain" 2>/dev/null | awk '{print $1}' | sort -u || true)
+		if [ -z "$addrs" ]; then
+			d_fail "$domain does not resolve"
+			d_fix "add an A (and/or AAAA) record pointing to this server"
+		else
+			mine=$( (
+				public_ip || true
+				fetch_stdout https://api6.ipify.org 2>/dev/null || true
+				echo
+				hostname -I 2>/dev/null || true
+			) | tr ' ' '\n' | sort -u)
+			for a in $addrs; do
+				is_cloudflare_ip "$a" && cf=1
+				grep -qxF "$a" <<<"$mine" && match=1
+			done
+			if [ $cf = 1 ]; then
+				d_fail "$domain resolves to Cloudflare's proxy ($(echo "$addrs" | tr '\n' ' ')) — SSH can't pass through it"
+				d_fix "Cloudflare dashboard → DNS → set this record to \"DNS only\" (grey cloud)"
+			elif [ $match = 1 ]; then
+				d_ok "$domain → $(echo "$addrs" | tr '\n' ' ')(this server)"
+			else
+				d_warn "$domain → $(echo "$addrs" | tr '\n' ' ')— not an address of this server"
+				d_fix "point the A/AAAA record at $(public_ip), unless a NAT or load balancer forwards it"
+			fi
+		fi
+	fi
+
+	d_head "Host key"
+	local hk=$STATE_DIR/host_ed25519
+	if [ -f "$hk" ]; then
+		local mode
+		mode=$(stat -Lc %a "$hk" 2>/dev/null || echo "?")
+		if [ "$mode" = 600 ] || [ "$mode" = 400 ]; then
+			d_ok "present, mode $mode"
+		else
+			d_warn "mode $mode — should be 600"
+			d_fix "sudo chmod 600 $hk"
+		fi
+		command -v ssh-keygen >/dev/null && d_ok "fingerprint $(ssh-keygen -lf "$hk" 2>/dev/null | awk '{print $2}')  (publish it so users can verify)"
+		echo "      Back it up (a lost key makes every client warn about a changed host):"
+		echo "        sudo install -m 600 $hk ~/ptterm-host-key.backup"
+	else
+		d_warn "no host key yet (it is created on first start)"
+	fi
+	local bf
+	bf=$(env_get PTT_BAN_FILE)
+	if [ -n "$bf" ] && [ -f "$bf" ]; then
+		mode=$(stat -Lc %a "$bf" 2>/dev/null || echo "?")
+		[ "$mode" = 600 ] && d_ok "ban list $bf mode 600" || d_warn "ban list $bf mode $mode — should be 600"
+	fi
+
+	d_head "Updates"
+	latest=$(fetch_stdout "https://raw.githubusercontent.com/$REPO/main/VERSION" 2>/dev/null | tr -d ' \n' || true)
+	if ! [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+		d_warn "couldn't check for updates (no access to GitHub?)"
+	elif [ "${v#v}" = "$latest" ]; then
+		d_ok "up to date (v$latest)"
+	elif [ "$(printf '%s\n%s\n' "${v#v}" "$latest" | sort -V | tail -1)" = "$latest" ]; then
+		d_warn "v$latest is available (installed: $v)"
+		d_fix "sudo ptterm-ctl upgrade"
+	else
+		d_ok "installed $v is newer than the latest release v$latest"
+	fi
+
+	echo
+	if [ $D_FAIL -gt 0 ]; then
+		echo "${C_R}${D_FAIL} problem(s)${C_0}, ${D_WARN} warning(s)."
+		exit 1
+	fi
+	echo "${C_G}No problems found${C_0}, ${D_WARN} warning(s)."
+}
+
 main() {
 	parse_args "$@"
 	case "$CMD" in
@@ -763,6 +987,7 @@ main() {
 	upgrade) do_upgrade ;;
 	uninstall) do_uninstall ;;
 	status) do_status ;;
+	doctor) do_doctor ;;
 	print-unit) print_unit ;;
 	help) usage ;;
 	esac

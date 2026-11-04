@@ -30,6 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 
 ```bash
 sudo ptterm-ctl status            # 运行状态 + 在线人数
+sudo ptterm-ctl doctor            # 自检：服务、端口、防火墙、域名解析、Cloudflare 灰云、主机密钥、新版本
 sudo ptterm-ctl upgrade           # 升级到最新版，保留配置和主机密钥
 sudo ptterm-ctl install --port 2299 --admin-key ~/.ssh/id_ed25519.pub   # 改配置（可重复执行）
 sudo ptterm-ctl uninstall         # 卸载（保留配置和主机密钥）
@@ -55,6 +56,23 @@ sudo ptterm-ctl uninstall --purge # 彻底删除
 
 - 云厂商的防火墙（Oracle VCN 安全列表、AWS/GCP 安全组等）放行 TCP 端口。
 - 域名 A/AAAA 记录指向 VPS。在 Cloudflare 上必须设为 **DNS only（灰云）**，橙云代理不转发 SSH。
+
+## 连不上？先跑自检
+
+```bash
+sudo ptterm-ctl doctor --domain chat.example.com
+```
+
+逐项检查并给出修复命令，有问题时退出码为 1：
+
+- 服务是否在运行、是否开机自启、是否反复重启
+- 聊天端口（和备用端口）是否在监听、有没有被别的程序占用、本机防火墙是否放行
+- 域名是否解析到本机；如果解析到 Cloudflare 的代理地址（橙色云朵），会提示改成“仅 DNS”（灰色云朵），因为 SSH 过不了 Cloudflare 代理
+- Tor（如果开了）：tor 是否运行、洋葱地址、本地监听
+- 主机密钥是否存在、权限是否 600，打印指纹和备份命令
+- 有没有新版本
+
+`--domain` 只需给一次：安装时用过 `--domain` 也会被记住。云服务商的安全组（Oracle VCN、AWS/GCP 安全组等）在服务器内部看不到，需要从别的网络实际连一次。
 
 ## 公布主机指纹
 

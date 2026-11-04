@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 - [x] **核对主机指纹、`ssh chat` 短命令**：写进文档，`ptterm-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
 - [x] **Tor 出口 IP 共用宽松限额**：避免误伤用 Tor 浏览器直连的人（反向借鉴 devzat，它拒绝 Tor 用户）
 - [x] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
-- [ ] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
+- [x] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
 - [ ] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
 
 ## 文档

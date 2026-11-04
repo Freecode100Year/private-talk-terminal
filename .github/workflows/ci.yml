@@ -143,6 +143,20 @@ jobs:
           sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --no-persist-bans
           sudo test ! -e /var/lib/ptterm/ban.key
 
+      - name: Doctor
+        run: |
+          exec > >(tee -a /tmp/ci-logs/doctor.log) 2>&1
+          set -x
+          sudo ptterm-ctl doctor --domain localhost
+          # a stopped service and a Cloudflare-proxied name are reported as problems
+          sudo systemctl stop ptterm
+          if sudo ptterm-ctl doctor > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed a stopped service"; exit 1; fi
+          grep -q "service is" /tmp/doc.txt
+          sudo systemctl start ptterm
+          echo "104.16.1.1 cf-proxied.test" | sudo tee -a /etc/hosts
+          if sudo ptterm-ctl doctor --domain cf-proxied.test > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed the Cloudflare proxy"; exit 1; fi
+          grep -q "grey cloud" /tmp/doc.txt
+
       - name: Status, reinstall, uninstall
         run: |
           exec > >(tee -a /tmp/ci-logs/status-reinstall-uninstall.log) 2>&1
