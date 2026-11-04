@@ -2,6 +2,8 @@ module github.com/Freecode100Year/vivant
 
 go 1.26.8
 
+toolchain go1.26.10
+
 require (
 	charm.land/ssh v0.4.3
 	charm.land/wish/v2 v2.0.5

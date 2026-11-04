@@ -10,7 +10,7 @@ make dist      # cross-compile amd64 / arm64 / armv7 + SHA256SUMS
 make bench     # load test
 ```
 
-Needs Go 1.26.8+. To release: change the `VERSION` file (e.g. `0.2.1`) and push to main, or push a `vX.Y.Z` tag; GitHub Actions tests, builds the three architectures and publishes the Release (with `SHA256SUMS`) and the Docker image. Servers upgrade with `sudo vivant-ctl upgrade`. On every push to main, CI verifies dependencies against Go's checksum database, runs govulncheck for published vulnerabilities in dependencies and the Go standard library (again before each release), and runs the installer for real on an Ubuntu machine with systemd: migration from the old Private-Talk Terminal, install, chat, exec refused, Tor, alternate port, ban persistence, doctor, port change, uninstall; it also builds and runs the Docker image.
+Needs Go 1.26.8+ (releases are built with Go 1.26.10, set by the toolchain line in go.mod). To release: change the `VERSION` file (e.g. `0.2.1`) and push to main, or push a `vX.Y.Z` tag; GitHub Actions tests, builds the three architectures and publishes the Release (with `SHA256SUMS`) and the Docker image. Servers upgrade with `sudo vivant-ctl upgrade`. On every push to main, CI verifies dependencies against Go's checksum database, runs govulncheck for published vulnerabilities in dependencies and the Go standard library (again before each release), and runs the installer for real on an Ubuntu machine with systemd: migration from the old Private-Talk Terminal, install, chat, exec refused, Tor, alternate port, ban persistence, doctor, port change, uninstall; it also builds and runs the Docker image.
 
 ```
 main.go                     flags, health endpoint, graceful shutdown
