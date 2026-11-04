@@ -230,10 +230,10 @@ jobs:
           ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/deploy_key
           cat ~/.ssh/deploy_key.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
           printf 'Host target\n  HostName 127.0.0.1\n  Port 22\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking accept-new\n' >> ~/.ssh/config
-          env $dead bash "$bundle" --to "$USER@target" --port 2244 --rooms "general:大厅 Lobby,it's:技术" < /dev/null > /tmp/to.txt 2>&1 || { cat /tmp/to.txt; exit 1; }
+          env $dead bash "$bundle" --to "$USER@target" --port 2244 --rooms "general:大厅 Lobby,tech:it's 技术" < /dev/null > /tmp/to.txt 2>&1 || { cat /tmp/to.txt; exit 1; }
           cat /tmp/to.txt
           for _ in $(seq 1 20); do ss -ltn | grep -q ':2244 ' && break; sleep 0.5; done
-          grep -q '^VIVANT_ROOMS=general:大厅 Lobby,it.s:技术' /etc/vivant.env
+          grep -q "^VIVANT_ROOMS=general:大厅 Lobby,tech:it's 技术" /etc/vivant.env
           # a damaged bundle is refused before anything is unpacked
           cp "$bundle" /tmp/bad.sh
           printf 'X' | dd of=/tmp/bad.sh bs=1 seek=$(( $(stat -c %s /tmp/bad.sh) - 100 )) conv=notrunc
