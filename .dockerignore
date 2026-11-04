@@ -5,4 +5,4 @@ data
 *.md
 docs
 deploy
-cmd/ptt-bench
+cmd/vivant-bench

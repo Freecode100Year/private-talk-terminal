@@ -55,12 +55,15 @@ jobs:
           V="${{ steps.v.outputs.version }}"
           FLAGS="-trimpath -ldflags=-s -ldflags=-w -ldflags=-X=main.version=${V}"
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64        go build $FLAGS -o dist/ptterm-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64        go build $FLAGS -o dist/ptterm-linux-arm64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7  go build $FLAGS -o dist/ptterm-linux-armv7 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64        go build $FLAGS -o dist/vivant-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64        go build $FLAGS -o dist/vivant-linux-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7  go build $FLAGS -o dist/vivant-linux-armv7 .
+          # same binaries under the pre-rename names, so "ptterm-ctl upgrade" on
+          # servers that haven't migrated yet keeps working
+          for a in amd64 arm64 armv7; do cp dist/vivant-linux-$a dist/ptterm-linux-$a; done
           cp install.sh dist/
-          (cd dist && sha256sum ptterm-linux-* install.sh > SHA256SUMS && cat SHA256SUMS)
-          ./dist/ptterm-linux-amd64 -version
+          (cd dist && sha256sum vivant-linux-* ptterm-linux-* install.sh > SHA256SUMS && cat SHA256SUMS)
+          ./dist/vivant-linux-amd64 -version
 
       - name: Publish
         if: steps.v.outputs.skip != 'true'
@@ -72,12 +75,15 @@ jobs:
           ## 一键安装 · One-line install
 
           ```bash
-          curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-terminal/main/install.sh | sudo bash
+          curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install.sh | sudo bash
           ```
 
-          已安装的服务器升级 · Upgrade an existing server: `sudo ptterm-ctl upgrade`
+          已安装的服务器升级 · Upgrade an existing server: `sudo vivant-ctl upgrade`
 
-          Binaries: `ptterm-linux-amd64` (x86_64), `ptterm-linux-arm64` (ARM64 e.g. Oracle Ampere), `ptterm-linux-armv7`. Verify with `SHA256SUMS`.
+          从 Private-Talk Terminal（ptterm）迁移：运行上面的一键命令即可，主机密钥、配置、封禁、洋葱地址都会保留。
+          Migrating from Private-Talk Terminal (ptterm): run the command above; host key, config, bans and onion address are kept.
+
+          程序 Binaries: `vivant-linux-amd64` (x86_64), `vivant-linux-arm64` (ARM64, e.g. Oracle Ampere), `vivant-linux-armv7`；用 `SHA256SUMS` 校验 · verify with `SHA256SUMS`. (`ptterm-linux-*` are the same files under the old names.)
           EOF
           gh release create "$V" dist/* --target "$GITHUB_SHA" --title "$V" --notes-file notes.md --generate-notes
 

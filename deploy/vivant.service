@@ -1,19 +1,19 @@
 [Unit]
-Description=Private-Talk Terminal (anonymous SSH chat)
-Documentation=https://github.com/Freecode100Year/private-talk-terminal
+Description=VIVANT (anonymous SSH chat)
+Documentation=https://github.com/Freecode100Year/vivant
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 # DynamicUser creates a throwaway unprivileged user; StateDirectory keeps the
-# SSH host key in /var/lib/ptterm across restarts and upgrades.
+# SSH host key in /var/lib/vivant across restarts and upgrades.
 DynamicUser=yes
-StateDirectory=ptterm
-WorkingDirectory=/var/lib/ptterm
-Environment=PTT_ADDR=:2222
-EnvironmentFile=-/etc/ptterm.env
-ExecStart=/usr/local/bin/ptterm -addr ${PTT_ADDR} -host-key /var/lib/ptterm/host_ed25519 $PTT_ARGS
+StateDirectory=vivant
+WorkingDirectory=/var/lib/vivant
+Environment=VIVANT_ADDR=:2222
+EnvironmentFile=-/etc/vivant.env
+ExecStart=/usr/local/bin/vivant -addr ${VIVANT_ADDR} -host-key /var/lib/vivant/host_ed25519 $VIVANT_ARGS
 Restart=always
 RestartSec=2
 

@@ -40,7 +40,7 @@ jobs:
         run: shellcheck -S warning install.sh
 
       - name: Unit file in sync with installer
-        run: bash install.sh --print-unit | diff -u deploy/ptterm.service -
+        run: bash install.sh --print-unit | diff -u deploy/vivant.service -
 
   installer:
     # Real end-to-end run of install.sh on a systemd machine, using a local
@@ -65,18 +65,48 @@ jobs:
           exec > >(tee -a /tmp/ci-logs/build-local-release.log) 2>&1
           set -x
           mkdir -p /tmp/rel
-          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=ci-${GITHUB_SHA::7}" -o /tmp/rel/ptterm-linux-amd64 .
-          (cd /tmp/rel && sha256sum ptterm-linux-* > SHA256SUMS)
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=ci-${GITHUB_SHA::7}" -o /tmp/rel/vivant-linux-amd64 .
+          (cd /tmp/rel && sha256sum vivant-linux-* > SHA256SUMS)
           (cd /tmp/rel && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1 &)
           sleep 1
+
+      - name: Migrate from Private-Talk Terminal v0.8.1
+        run: |
+          exec > >(tee -a /tmp/ci-logs/migrate.log) 2>&1
+          set -x
+          # a real pre-rename install: released binary, onion service, persistent bans
+          curl -fsSL -o /tmp/old-install.sh https://github.com/Freecode100Year/private-talk-terminal/releases/download/v0.8.1/install.sh
+          sudo PTT_VERSION=v0.8.1 bash /tmp/old-install.sh --tor --persist-bans
+          systemctl is-active --quiet ptterm
+          fp_old=$(ssh-keyscan -p 2222 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
+          onion_old=$(sudo cat /var/lib/tor/ptterm/hostname)
+          test -n "$fp_old" && test -n "$onion_old"
+          # the new installer migrates it
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 bash install.sh
+          systemctl is-active --quiet vivant
+          if systemctl list-unit-files ptterm.service | grep -q ptterm.service; then echo "old unit left"; exit 1; fi
+          test ! -e /usr/local/bin/ptterm && test ! -e /etc/ptterm.env && test ! -e /var/lib/tor/ptterm
+          fp_new=$(ssh-keyscan -p 2222 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
+          test "$fp_old" = "$fp_new"                                          # no "host key changed" warning
+          test "$(sudo cat /var/lib/tor/vivant/hostname)" = "$onion_old"      # same onion address
+          grep -q '^VIVANT_BAN_FILE=/var/lib/vivant/bans.json' /etc/vivant.env
+          grep -q '^VIVANT_ONION_ADDR=' /etc/vivant.env
+          grep -q 'BEGIN vivant' /etc/tor/torrc
+          if grep -q private-talk-terminal /etc/tor/torrc; then echo "old torrc block left"; exit 1; fi
+          for _ in $(seq 1 20); do ss -ltn | grep -q '127.0.0.1:2224 ' && break; sleep 0.5; done
+          out=$( (sleep 1; echo /quit) | ssh -T -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
+          echo "$out" | grep -q "Welcome"
+          # the old management command still works
+          sudo ptterm-ctl status > /tmp/st.txt
+          grep -q "Version" /tmp/st.txt
 
       - name: Install
         run: |
           exec > >(tee -a /tmp/ci-logs/install.log) 2>&1
           set -x
           mkdir -p ~/.ssh
-          ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/ptt_admin
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 bash install.sh --admin-key ~/.ssh/ptt_admin.pub --domain localhost
+          ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/vivant_admin
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 bash install.sh --admin-key ~/.ssh/vivant_admin.pub --domain localhost
 
       - name: Chat over SSH
         run: |
@@ -109,10 +139,10 @@ jobs:
         run: |
           exec > >(tee -a /tmp/ci-logs/tor.log) 2>&1
           set -x
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --tor
-          onion=$(sudo cat /var/lib/tor/ptterm/hostname)
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --tor
+          onion=$(sudo cat /var/lib/tor/vivant/hostname)
           echo "$onion" | grep -Eq '^[a-z2-7]{56}\.onion$'
-          sudo ptterm-ctl status > /tmp/status.txt
+          sudo vivant-ctl status > /tmp/status.txt
           grep -q "Onion:" /tmp/status.txt
           # the local side of the onion service accepts chat sessions
           out=$( (sleep 1; echo /quit) | ssh -T -p 2224 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
@@ -124,10 +154,10 @@ jobs:
         run: |
           exec > >(tee -a /tmp/ci-logs/alt-port.log) 2>&1
           set -x
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port 443
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --alt-port 443
           out=$( (sleep 1; echo /quit) | ssh -T -p 443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null guest@127.0.0.1 )
           echo "$out" | grep -Eq "欢迎|Welcome"
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --alt-port off
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --alt-port off
           ss -ltn > /tmp/ss.txt
           if grep -q ':443 ' /tmp/ss.txt; then echo "443 still open"; exit 1; fi
 
@@ -135,41 +165,41 @@ jobs:
         run: |
           exec > >(tee -a /tmp/ci-logs/persist-bans.log) 2>&1
           set -x
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --persist-bans
-          sudo journalctl -u ptterm -n 20 --no-pager > /tmp/j.txt
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --persist-bans
+          sudo journalctl -u vivant -n 20 --no-pager > /tmp/j.txt
           grep -q "ban persistence enabled" /tmp/j.txt
-          sudo test -f /var/lib/ptterm/ban.key
-          test "$(sudo stat -c %a /var/lib/ptterm/ban.key)" = 600
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --no-persist-bans
-          sudo test ! -e /var/lib/ptterm/ban.key
+          sudo test -f /var/lib/vivant/ban.key
+          test "$(sudo stat -c %a /var/lib/vivant/ban.key)" = 600
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --no-persist-bans
+          sudo test ! -e /var/lib/vivant/ban.key
 
       - name: Doctor
         run: |
           exec > >(tee -a /tmp/ci-logs/doctor.log) 2>&1
           set -x
-          sudo ptterm-ctl doctor --domain localhost
+          sudo vivant-ctl doctor --domain localhost
           # a stopped service and a Cloudflare-proxied name are reported as problems
-          sudo systemctl stop ptterm
-          if sudo ptterm-ctl doctor > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed a stopped service"; exit 1; fi
+          sudo systemctl stop vivant
+          if sudo vivant-ctl doctor > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed a stopped service"; exit 1; fi
           grep -q "service is" /tmp/doc.txt
-          sudo systemctl start ptterm
+          sudo systemctl start vivant
           echo "104.16.1.1 cf-proxied.test" | sudo tee -a /etc/hosts
-          if sudo ptterm-ctl doctor --domain cf-proxied.test > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed the Cloudflare proxy"; exit 1; fi
+          if sudo vivant-ctl doctor --domain cf-proxied.test > /tmp/doc.txt; then cat /tmp/doc.txt; echo "doctor missed the Cloudflare proxy"; exit 1; fi
           grep -q "grey cloud" /tmp/doc.txt
 
       - name: Status, reinstall, uninstall
         run: |
           exec > >(tee -a /tmp/ci-logs/status-reinstall-uninstall.log) 2>&1
           set -x
-          sudo ptterm-ctl status
-          sudo PTT_DOWNLOAD_BASE=http://127.0.0.1:8765 ptterm-ctl install --port 2299
+          sudo vivant-ctl status
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --port 2299
           ss -ltn > /tmp/ss.txt
           grep -q ':2299 ' /tmp/ss.txt
-          sudo ptterm-ctl uninstall --purge
-          if grep -q "private-talk-terminal" /etc/tor/torrc; then echo "torrc not cleaned"; exit 1; fi
-          test ! -e /var/lib/tor/ptterm
-          if systemctl is-active --quiet ptterm; then echo "still running"; exit 1; fi
-          test ! -e /usr/local/bin/ptterm
+          sudo vivant-ctl uninstall --purge
+          if grep -q "BEGIN vivant" /etc/tor/torrc; then echo "torrc not cleaned"; exit 1; fi
+          test ! -e /var/lib/tor/vivant
+          if systemctl is-active --quiet vivant; then echo "still running"; exit 1; fi
+          test ! -e /usr/local/bin/vivant
 
       - name: Diagnostics
         if: failure()
@@ -179,8 +209,8 @@ jobs:
           for f in /tmp/ci-logs/*.log; do
             echo "::error title=$(basename "$f")::$(tail -n 40 "$f" | enc)"
           done
-          echo "::error title=journal::$(sudo journalctl -u ptterm -n 40 --no-pager 2>&1 | enc)"
-          echo "::error title=systemctl::$(systemctl status ptterm --no-pager 2>&1 | tail -n 20 | enc)"
+          echo "::error title=journal::$(sudo journalctl -u vivant -n 40 --no-pager 2>&1 | enc)"
+          echo "::error title=systemctl::$(systemctl status vivant --no-pager 2>&1 | tail -n 20 | enc)"
 
   docker:
     # The container image builds, runs as non-root on a read-only root
@@ -191,23 +221,23 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Build image
-        run: docker build --build-arg VERSION=ci -t ptterm:ci .
+        run: docker build --build-arg VERSION=ci -t vivant:ci .
 
       - name: Run and chat
         run: |
           set -x
-          docker run -d --name ptterm --network host --read-only --cap-drop ALL \
-            --security-opt no-new-privileges -v ptterm-data:/data -e PTT_ADDR=:2290 ptterm:ci
+          docker run -d --name vivant --network host --read-only --cap-drop ALL \
+            --security-opt no-new-privileges -v vivant-data:/data -e VIVANT_ADDR=:2290 vivant:ci
           for _ in $(seq 1 30); do ss -ltn | grep -q ':2290 ' && break; sleep 0.5; done
           out=$( (sleep 1; echo "/nick dock"; sleep 0.5; echo "hi from docker"; sleep 0.5; echo /quit) \
             | ssh -T -p 2290 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null en@127.0.0.1 )
           echo "$out"
           echo "$out" | grep -q "Welcome"
           echo "$out" | grep -q "<dock> hi from docker"
-          test "$(docker exec ptterm /usr/local/bin/ptterm -version)" = "ptterm ci"
+          test "$(docker exec vivant /usr/local/bin/vivant -version)" = "vivant ci"
           # the host key lands in the volume and survives a restart
           fp1=$(ssh-keyscan -p 2290 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
-          docker restart ptterm
+          docker restart vivant
           for _ in $(seq 1 30); do ss -ltn | grep -q ':2290 ' && break; sleep 0.5; done
           sleep 1
           fp2=$(ssh-keyscan -p 2290 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
@@ -215,4 +245,4 @@ jobs:
 
       - name: Logs
         if: always()
-        run: docker logs ptterm 2>&1 | tail -50 || true
+        run: docker logs vivant 2>&1 | tail -50 || true

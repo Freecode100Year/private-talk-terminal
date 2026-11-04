@@ -2,8 +2,8 @@
 # Host networking keeps each user's real address for rate limits and bans
 # (Docker's port proxy would make everyone look like one address).
 services:
-  ptterm:
-    image: ghcr.io/freecode100year/private-talk-terminal:latest
+  vivant:
+    image: ghcr.io/freecode100year/vivant:latest
     network_mode: host
     restart: unless-stopped
     read_only: true
@@ -12,15 +12,14 @@ services:
     ulimits:
       core: 0
     environment:
-      PTT_ADDR: ":2222"
+      VIVANT_ADDR: ":2222"
       GOMEMLIMIT: "600MiB"
-      # PTT_LANG: "en"
-      # PTT_ROOMS: "general:大厅,english:English"
+      # VIVANT_ROOMS: "general:大厅,english:English"
     command: ["-history", "50", "-history-ttl", "1h", "-max-per-ip", "3", "-idle-timeout", "1h"]
     volumes:
-      - ptterm-data:/data
+      - vivant-data:/data
     logging:
       driver: local
       options: { max-size: "5m", max-file: "2" }
 volumes:
-  ptterm-data:
+  vivant-data:
