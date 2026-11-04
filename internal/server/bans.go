@@ -49,6 +49,16 @@ func loadOrCreateSalt(path string) ([]byte, error) {
 	return b, nil
 }
 
+func activeBans(bans map[string]time.Time, now time.Time) int {
+	n := 0
+	for _, until := range bans {
+		if until.After(now) {
+			n++
+		}
+	}
+	return n
+}
+
 func readBans(path string) (map[string]time.Time, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

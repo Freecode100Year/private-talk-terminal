@@ -110,6 +110,7 @@ func main() {
 		AdminKeysPath: *adminKeys,
 		IdleTimeout:   connIdle(*idle),
 		MaxTCPPerIP:   *tcpPerIP,
+		MaxTCP:        2**maxClients + 500,
 		ReadRate:      *readRate,
 		ReadBurst:     8 * *readRate,
 		AdminUser:     *adminUser,

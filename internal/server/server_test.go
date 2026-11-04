@@ -383,3 +383,82 @@ func TestHandshakeTimeout(t *testing.T) {
 	io.WriteString(in, "still here\n")
 	waitFor(t, out, "still here")
 }
+
+// With no ban still running, a restart starts from a fresh ban key, so a
+// leaked copy of the old key can't be used on past bans.
+func TestBanKeyRotatesWhenNoActiveBans(t *testing.T) {
+	dir := t.TempDir()
+	banFile := filepath.Join(dir, "bans.json")
+	mk := func() *Server {
+		srv, err := New(chat.NewHub(chat.Config{}), Options{Addr: "127.0.0.1:0", HostKeyPath: filepath.Join(dir, "hk"), BanFile: banFile},
+			slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return srv
+	}
+	addr := &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 1}
+	k1 := mk().addrKey(addr)
+	// only an expired ban on disk
+	if err := writeBans(banFile, map[string]time.Time{k1: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if k2 := mk().addrKey(addr); k2 == k1 {
+		t.Fatal("ban key kept although no ban is active")
+	}
+}
+
+func TestLegacyAlgorithmsRefused(t *testing.T) {
+	addr := startServer(t)
+	try := func(cfg gossh.Config) error {
+		c, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{User: "guest", Config: cfg,
+			HostKeyCallback: gossh.InsecureIgnoreHostKey(), Timeout: 5 * time.Second})
+		if err == nil {
+			c.Close()
+		}
+		return err
+	}
+	for _, kex := range []string{gossh.InsecureKeyExchangeDH14SHA1, gossh.KeyExchangeDH14SHA256, gossh.KeyExchangeDH16SHA512} {
+		if try(gossh.Config{KeyExchanges: []string{kex}}) == nil {
+			t.Errorf("key exchange %s accepted", kex)
+		}
+	}
+	if try(gossh.Config{MACs: []string{gossh.HMACSHA1}, Ciphers: []string{gossh.CipherAES128CTR}}) == nil {
+		t.Error("hmac-sha1 accepted")
+	}
+	for _, kex := range []string{gossh.KeyExchangeMLKEM768X25519, gossh.KeyExchangeCurve25519} {
+		if err := try(gossh.Config{KeyExchanges: []string{kex}}); err != nil {
+			t.Errorf("modern key exchange %s refused: %v", kex, err)
+		}
+	}
+}
+
+func TestGlobalTCPCap(t *testing.T) {
+	addr := startServerWith(t, func(o *Options) { o.MaxTCP = 2; o.MaxTCPPerIP = 10 })
+	time.Sleep(100 * time.Millisecond) // let startServer's probe connection go away
+	var held []net.Conn
+	for i := 0; i < 2; i++ {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+		c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, 8)
+		if _, err := c.Read(buf); err != nil { // server banner = accepted
+			t.Fatalf("connection %d not served: %v", i, err)
+		}
+	}
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if n, _ := c.Read(make([]byte, 8)); n > 0 {
+		t.Fatal("third connection served beyond the global cap")
+	}
+	c.Close()
+	for _, h := range held {
+		h.Close()
+	}
+}

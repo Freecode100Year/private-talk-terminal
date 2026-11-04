@@ -9,12 +9,19 @@ import (
 // Sanitize removes anything that could manipulate a terminal or spoof the
 // display: C0/C1 control characters (which kills every ANSI/OSC escape
 // sequence, because they all start with ESC 0x1b or CSI 0x9b), DEL, and
-// Unicode bidi overrides/isolates. Tabs become spaces. Invalid UTF-8 is
-// dropped. The result is trimmed and capped at maxRunes runes.
+// Unicode bidi overrides/isolates, and invisible format characters (zero-
+// width spaces, word joiners, "tag" characters that can smuggle hidden
+// text). Tabs become spaces. Invalid UTF-8 is dropped. The result is trimmed
+// and capped at maxRunes runes.
+//
+// Kept on purpose: ZWJ/ZWNJ (emoji sequences, Persian, Indic scripts) and
+// tag characters directly inside a 🏴 flag sequence (England, Scotland,
+// Wales flags).
 func Sanitize(s string, maxRunes int) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	n := 0
+	inFlag := false // after U+1F3F4, inside its tag sequence
 	for len(s) > 0 {
 		r, size := utf8.DecodeRuneInString(s)
 		s = s[size:]
@@ -26,6 +33,14 @@ func Sanitize(s string, maxRunes int) string {
 		}
 		if !Printable(r) {
 			continue
+		}
+		if isTag(r) {
+			if !inFlag {
+				continue
+			}
+			inFlag = r != 0xe007f // CANCEL TAG ends the sequence
+		} else {
+			inFlag = r == 0x1f3f4
 		}
 		if maxRunes > 0 && n >= maxRunes {
 			break
@@ -44,9 +59,15 @@ func Printable(r rune) bool {
 		return false
 	case isBidiControl(r), r == 0xfeff, r == utf8.RuneError:
 		return false
+	case r == 0x200c || r == 0x200d || isTag(r): // ZWNJ, ZWJ; tags are checked in context by Sanitize
+		return true
+	case unicode.Is(unicode.Cf, r): // other invisible format characters
+		return false
 	}
 	return true
 }
+
+func isTag(r rune) bool { return r >= 0xe0020 && r <= 0xe007f }
 
 func isBidiControl(r rune) bool {
 	switch {

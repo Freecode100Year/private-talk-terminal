@@ -78,6 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 - [x] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
 - [x] **握手超时**：30 秒内没进入聊天的连接直接断开，扫描器占不住名额；443 等知名端口在安装和 `doctor` 时给出提醒
 - [x] **外部监控、口令设计原则**：写进文档（借鉴 devzat、ssh-chat、sshoosh）
+- [x] **安全审计后的加固**：只用现代 SSH 算法、剔除隐形字符和标签字符（附模糊测试）、TCP 总连接上限、没有生效封禁时自动换封禁密钥
 
 ## 文档
 

@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -49,6 +50,7 @@ type Options struct {
 	MaxTimeout    time.Duration // absolute session limit (0 = none)
 	Banner        string
 	MaxTCPPerIP   int      // raw TCP connections per address, incl. unauthenticated (default 8)
+	MaxTCP        int      // raw TCP connections in total, incl. unauthenticated (default 2500)
 	ReadRate      int      // bytes/s a connection may send us; excess is slowed down, not dropped (0 = off)
 	ReadBurst     int      // bytes allowed at full speed before ReadRate applies
 	AdminUser     string   // username that authenticates with an admin key (default "admin")
@@ -70,6 +72,36 @@ const (
 	connKey   ctxKey = 2
 )
 
+// sshAlgorithms drops the legacy choices golang.org/x/crypto still offers by
+// default (SHA-1 key exchange and MACs) and the finite-field Diffie-Hellman
+// groups, whose 2048–4096-bit modular exponentiation is the most CPU a
+// client can make the server spend before it even authenticates. Every SSH
+// client from the last decade (OpenSSH ≥ 6.5, PuTTY ≥ 0.68, Termius, iSH)
+// speaks curve25519.
+var sshAlgorithms = gossh.Config{
+	KeyExchanges: []string{
+		gossh.KeyExchangeMLKEM768X25519, // post-quantum hybrid
+		gossh.KeyExchangeCurve25519,
+		gossh.KeyExchangeECDHP256,
+		gossh.KeyExchangeECDHP384,
+		gossh.KeyExchangeECDHP521,
+	},
+	Ciphers: []string{
+		gossh.CipherChaCha20Poly1305,
+		gossh.CipherAES256GCM,
+		gossh.CipherAES128GCM,
+		gossh.CipherAES256CTR,
+		gossh.CipherAES192CTR,
+		gossh.CipherAES128CTR,
+	},
+	MACs: []string{
+		gossh.HMACSHA256ETM,
+		gossh.HMACSHA512ETM,
+		gossh.HMACSHA256,
+		gossh.HMACSHA512,
+	},
+}
+
 // handshakeTimeout: a connection that hasn't opened a chat session by then is
 // closed. Real clients take well under a second (a few over Tor); port
 // scanners and stalled handshakes would otherwise hold a connection slot
@@ -87,6 +119,8 @@ type Server struct {
 	tcpMu     sync.Mutex
 	tcpConns  map[string]int
 	tcpMax    int
+	tcpTotal  int
+	tcpAll    int // cap on tcpTotal
 	readRate  float64
 	readBurst float64
 
@@ -106,6 +140,9 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
 	}
+	if s.tcpAll = opt.MaxTCP; s.tcpAll <= 0 {
+		s.tcpAll = 2500
+	}
 	if opt.ReadRate > 0 {
 		s.readRate, s.readBurst = float64(opt.ReadRate), float64(max(opt.ReadBurst, opt.ReadRate))
 	}
@@ -119,16 +156,25 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 		return nil, err
 	}
 	if opt.BanFile != "" {
-		salt, err := loadOrCreateSalt(filepath.Join(filepath.Dir(opt.BanFile), "ban.key"))
+		bans, err := readBans(opt.BanFile)
+		if err != nil {
+			return nil, fmt.Errorf("ban file: %w", err)
+		}
+		keyPath := filepath.Join(filepath.Dir(opt.BanFile), "ban.key")
+		if activeBans(bans, time.Now()) == 0 {
+			// Nothing to carry over: start with a fresh key, so the old one
+			// (and any copy of it) can't be used against past bans.
+			if err := os.Remove(keyPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("ban key: %w", err)
+			}
+			bans = nil
+		}
+		salt, err := loadOrCreateSalt(keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("ban key: %w", err)
 		}
 		s.salt = salt
 		s.banFile = opt.BanFile
-		bans, err := readBans(opt.BanFile)
-		if err != nil {
-			return nil, fmt.Errorf("ban file: %w", err)
-		}
 		log.Info("ban persistence enabled", "loaded", hub.LoadBans(bans))
 	}
 	if opt.AdminKeysPath != "" {
@@ -155,6 +201,7 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 		func(srv *ssh.Server) error {
 			srv.ServerConfigCallback = func(ssh.Context) *gossh.ServerConfig {
 				return &gossh.ServerConfig{
+					Config:       sshAlgorithms,
 					NoClientAuth: true,
 					NoClientAuthCallback: func(cm gossh.ConnMetadata) (*gossh.Permissions, error) {
 						if s.isAdminUser(cm.User()) {
@@ -307,15 +354,17 @@ func (s *Server) limitConn(ctx ssh.Context, conn net.Conn) net.Conn {
 	}
 	s.tcpMu.Lock()
 	defer s.tcpMu.Unlock()
-	if s.tcpConns[key] >= limit {
+	if s.tcpConns[key] >= limit || s.tcpTotal >= s.tcpAll {
 		return nil
 	}
 	s.tcpConns[key]++
+	s.tcpTotal++
 	cc := &countedConn{Conn: conn, rate: s.readRate, tokens: s.readBurst, burst: s.readBurst, last: time.Now()}
 	ctx.SetValue(connKey, cc)
 	cc.release = func() {
 		s.tcpMu.Lock()
 		defer s.tcpMu.Unlock()
+		s.tcpTotal--
 		if s.tcpConns[key] <= 1 {
 			delete(s.tcpConns, key)
 		} else {
