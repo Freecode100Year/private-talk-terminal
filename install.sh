@@ -963,6 +963,8 @@ do_doctor() {
 	latest=$(fetch_stdout "https://raw.githubusercontent.com/$REPO/main/VERSION" 2>/dev/null | tr -d ' \n' || true)
 	if ! [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
 		d_warn "couldn't check for updates (no access to GitHub?)"
+	elif ! [[ "${v#v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+		d_ok "development build $v (latest release: v$latest)"
 	elif [ "${v#v}" = "$latest" ]; then
 		d_ok "up to date (v$latest)"
 	elif [ "$(printf '%s\n%s\n' "${v#v}" "$latest" | sort -V | tail -1)" = "$latest" ]; then
