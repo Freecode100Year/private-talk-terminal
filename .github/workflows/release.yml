@@ -46,6 +46,7 @@ jobs:
         if: steps.v.outputs.skip != 'true'
         run: |
           go mod verify
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./...
           go test -count=1 ./...
 
       - name: Build

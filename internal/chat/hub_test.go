@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -669,4 +670,37 @@ func hasLine(evs []Event, sub string) bool {
 		}
 	}
 	return false
+}
+
+// More than 10,000 anonymous users must not hang the hub looking for a name.
+func TestFreeNickNeverSpins(t *testing.T) {
+	h := NewHub(Config{MaxClients: 20000, MaxConnsPerIP: 20000, ConnPerMinute: 20000})
+	for i := 0; i < 10000; i++ {
+		h.byNick[fmt.Sprintf("anonymous_%04d", i)] = &Client{}
+	}
+	done := make(chan string)
+	go func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		done <- h.freeNickLocked()
+	}()
+	select {
+	case n := <-done:
+		if !ValidNick(n) || len(n) != len("anonymous_00000") {
+			t.Fatalf("got %q", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("freeNickLocked spins when four-digit names run out")
+	}
+}
+
+func TestRandomCode(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		c := randomCode(10)
+		if len(c) != 10 || seen[c] || strings.Trim(c, codeAlphabet) != "" {
+			t.Fatalf("bad code %q", c)
+		}
+		seen[c] = true
+	}
 }

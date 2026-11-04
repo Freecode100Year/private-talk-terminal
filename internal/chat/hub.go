@@ -1408,26 +1408,39 @@ func pruneTimes(ts []time.Time, after time.Time) []time.Time {
 	return ts[i:]
 }
 
+// freeNickLocked picks an unused random nickname. Four digits while the
+// room is small; more digits once they run short, so it never spins with
+// the hub lock held (there are only 10,000 four-digit names).
 func (h *Hub) freeNickLocked() string {
-	for {
-		n := fmt.Sprintf("anonymous_%04d", mrand.IntN(10000))
-		if h.byNick[n] == nil {
-			return n
+	for digits, span := 4, 10000; ; digits, span = digits+1, span*10 {
+		for range 20 {
+			n := fmt.Sprintf("anonymous_%0*d", digits, mrand.IntN(span))
+			if h.byNick[n] == nil {
+				return n
+			}
 		}
 	}
 }
 
 const codeAlphabet = "abcdefghjkmnpqrstuvwxyz23456789"
 
+// randomCode returns n characters from codeAlphabet, uniformly (bytes that
+// would bias the modulo are redrawn), from crypto/rand.
 func randomCode(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
+	const limit = 256 - 256%len(codeAlphabet)
+	out := make([]byte, 0, n)
+	buf := make([]byte, 2*n)
+	for len(out) < n {
+		if _, err := rand.Read(buf); err != nil {
+			panic(err)
+		}
+		for _, c := range buf {
+			if int(c) < limit && len(out) < n {
+				out = append(out, codeAlphabet[int(c)%len(codeAlphabet)])
+			}
+		}
 	}
-	for i := range b {
-		b[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
-	}
-	return string(b)
+	return string(out)
 }
 
 // --- status for front-ends -------------------------------------------------

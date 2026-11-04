@@ -27,6 +27,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Known vulnerabilities (govulncheck)
+        # fails when code that is actually reachable uses a module or Go
+        # standard library version with a published vulnerability
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       - name: Test
         run: go test -race -count=1 ./...
 
