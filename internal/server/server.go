@@ -65,7 +65,16 @@ const OnionKey = chat.OnionKey
 
 type ctxKey int
 
-const clientKey ctxKey = 1
+const (
+	clientKey ctxKey = 1
+	connKey   ctxKey = 2
+)
+
+// handshakeTimeout: a connection that hasn't opened a chat session by then is
+// closed. Real clients take well under a second (a few over Tor); port
+// scanners and stalled handshakes would otherwise hold a connection slot
+// until the idle timeout, an hour later.
+var handshakeTimeout = 30 * time.Second
 
 // Server is a running chat SSH server.
 type Server struct {
@@ -262,6 +271,9 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 			wish.Fatalln(sess, "This server only offers the chat room. Connect without a command:  ssh -p 2222 guest@<host>")
 			return
 		}
+		if cc, ok := sess.Context().Value(connKey).(*countedConn); ok {
+			cc.started.Store(true)
+		}
 		admin := s.isAdminUser(sess.User()) && s.isAdmin(sess.PublicKey())
 		lang := sessionLang(sess.User(), sess.Environ())
 		c, err := s.hub.ConnectLang(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin, lang)
@@ -287,7 +299,7 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 
 // limitConn caps raw TCP connections per address, so nobody can hold
 // hundreds of idle or half-open connections without ever opening a session.
-func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
+func (s *Server) limitConn(ctx ssh.Context, conn net.Conn) net.Conn {
 	key := s.keyFor(conn.LocalAddr(), conn.RemoteAddr())
 	limit := s.tcpMax
 	if key == OnionKey {
@@ -300,6 +312,7 @@ func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
 	}
 	s.tcpConns[key]++
 	cc := &countedConn{Conn: conn, rate: s.readRate, tokens: s.readBurst, burst: s.readBurst, last: time.Now()}
+	ctx.SetValue(connKey, cc)
 	cc.release = func() {
 		s.tcpMu.Lock()
 		defer s.tcpMu.Unlock()
@@ -309,6 +322,11 @@ func (s *Server) limitConn(_ ssh.Context, conn net.Conn) net.Conn {
 			s.tcpConns[key]--
 		}
 	}
+	time.AfterFunc(handshakeTimeout, func() {
+		if !cc.started.Load() {
+			cc.Close() // harmless if already closed
+		}
+	})
 	return cc
 }
 
@@ -320,6 +338,7 @@ type countedConn struct {
 	net.Conn
 	once    sync.Once
 	release func()
+	started atomic.Bool // a chat session is running; the handshake timeout no longer applies
 
 	rate, burst, tokens float64 // only touched by the single reading goroutine
 	last                time.Time

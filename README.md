@@ -77,6 +77,8 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 - [x] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
 - [x] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
 - [x] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
+- [x] **握手超时**：30 秒内没进入聊天的连接直接断开，扫描器占不住名额；443 等知名端口在安装和 `doctor` 时给出提醒
+- [x] **外部监控、口令设计原则**：写进文档（借鉴 devzat、ssh-chat、sshoosh）
 
 ## 文档
 

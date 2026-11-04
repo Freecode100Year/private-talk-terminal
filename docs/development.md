@@ -39,4 +39,5 @@ deploy/                     systemd 单元（由 install.sh --print-unit 生成�
 - [x] 按客户端语言只显示一种语言（`LANG`、`en@` 登录、`/lang`）
 - [x] `ptterm-ctl doctor` 自检
 - [x] 连接层读取限速、Docker 镜像（GHCR）
+- [x] 握手超时（30 秒），知名端口提醒，外部监控文档
 - 不计划：在 SSH 聊天室本身里做端到端加密。这需要在用户设备上安装专用客户端，与“一条 ssh 命令就能进”的定位冲突。

@@ -665,6 +665,10 @@ do_install() {
 		if [ -n "$owner" ] && [ "$owner" != ptterm ]; then
 			die "port $ALT_PORT is already in use by '$owner' (a web server on 443?). Pick another --alt-port, or skip it."
 		fi
+		if [ "$ALT_PORT" -lt 1024 ]; then
+			warn "port $ALT_PORT is scanned constantly by bots; expect probe noise. Scanners are dropped after 30 s and"
+			warn "limited per address like everyone else. Only keep it if your users need it: --alt-port off removes it."
+		fi
 	fi
 
 	get_binary
@@ -877,6 +881,12 @@ do_doctor() {
 			;;
 		*) d_ok "no blocking local firewall found for $p/tcp" ;;
 		esac
+	done
+	for p in $port $alt; do
+		if [ "$p" -lt 1024 ] && [ "$p" != 22 ]; then
+			d_warn "TCP $p is a well-known port: bots scan it constantly (they're dropped after 30 s, limited per address)"
+			[ "$p" = "$alt" ] && d_fix "not needed by your users? sudo ptterm-ctl install --alt-port off"
+		fi
 	done
 	if [ "$port" = 22 ] || [ "$alt" = 22 ]; then
 		d_warn "the chat uses port 22 — make sure your own admin SSH runs on another port"

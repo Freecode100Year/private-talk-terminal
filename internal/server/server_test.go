@@ -354,3 +354,32 @@ func TestReadThrottle(t *testing.T) {
 		t.Fatalf("read %d bytes in %s", n, el)
 	}
 }
+
+func TestHandshakeTimeout(t *testing.T) {
+	old := handshakeTimeout
+	handshakeTimeout = 300 * time.Millisecond
+	defer func() { handshakeTimeout = old }()
+	addr := startServer(t)
+
+	// a scanner that connects and never speaks SSH is dropped
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	raw.SetReadDeadline(time.Now().Add(5 * time.Second))
+	start := time.Now()
+	if _, err := io.Copy(io.Discard, raw); err != nil {
+		t.Fatalf("expected the server to close the connection, got %v", err)
+	}
+	if el := time.Since(start); el > 3*time.Second {
+		t.Fatalf("closed after %s", el)
+	}
+
+	// a real session outlives the timeout
+	in, out := plainSession(t, dial(t, addr))
+	waitFor(t, out, "已进入 #general")
+	time.Sleep(600 * time.Millisecond)
+	io.WriteString(in, "still here\n")
+	waitFor(t, out, "still here")
+}
