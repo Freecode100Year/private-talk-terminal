@@ -21,7 +21,7 @@ internal/ui/plain.go        纯文本行模式
 internal/ui/format.go       消息格式、时区、@提及
 internal/server/            Wish SSH 网关、认证、连接限制、封禁持久化
 cmd/vivant-bench/           压测工具
-deploy/                     systemd 单元（由 install.sh --print-unit 生成）和配置示例
+deploy/                     systemd 单元（由 install.sh --print-unit 生成）、配置示例、离线一键安装包的打包脚本
 ```
 
 用户看得到的文字（聊天提示、`/help`、按键说明、安装脚本和自检输出、`vivant -h`）一律同时写简体中文和英文；源码注释保持英文。

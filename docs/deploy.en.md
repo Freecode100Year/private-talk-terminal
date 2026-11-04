@@ -61,16 +61,22 @@ Restricted network: point `VIVANT_DOWNLOAD_BASE=<mirror>` at a directory with `v
 
 ## Offline install (server can't reach GitHub)
 
-Every release includes an offline bundle, `vivant-<version>-linux-offline.tar.gz`, with the binaries for all three architectures, the installer and checksums. Download it from [Releases](https://github.com/Freecode100Year/vivant/releases) on a machine with internet access and copy it to the server:
+Every release includes an offline one-click installer, `vivant-<version>-linux-offline.sh`: a single file holding the binaries for all three architectures, the installer and checksums; it never touches the network. Download it from [Releases](https://github.com/Freecode100Year/vivant/releases) on a machine with internet access, then either:
 
 ```bash
-scp vivant-v0.9.2-linux-offline.tar.gz root@SERVER:
-# on the server
-tar xzf vivant-v0.9.2-linux-offline.tar.gz && cd vivant-v0.9.2-linux-offline
-sudo ./install.sh                     # same options as the online installer
+# Option 1: deploy to the server with one command from your computer (Linux, macOS, or Git Bash / WSL on Windows)
+bash vivant-v0.9.3-linux-offline.sh --to root@SERVER
+
+# Option 2: copy the file to the server and run it there
+scp vivant-v0.9.3-linux-offline.sh root@SERVER:
+sudo bash vivant-v0.9.3-linux-offline.sh
 ```
 
-When the installer finds the binary next to it, it uses that (verified against `SHA256SUMS` first; a mismatch is refused) and never touches the network. To upgrade, get the new bundle and run it again; configuration and host key are kept. Only two options still need the network: `--tor` (installs tor from the package repositories, unless it's already installed) and `--admin-key github:USERNAME` (offline, pass a key file instead).
+Add the same options as the online installer, e.g. `--to root@SERVER --port 2222 --admin-key ~/.ssh/id_ed25519.pub` (with option 1 a key file path refers to the server, so copy the key there first or use option 2). `--to` uses the ssh/scp on your computer; if the server user isn't root it uses sudo.
+
+The file first verifies itself (an incomplete download or a modified file is refused), unpacks the installer and binaries, the installer checks the binary against `SHA256SUMS` again and installs it, and the temporary files are removed. To upgrade, get the new file and run it again; configuration and host key are kept. `--extract` only unpacks; `--help` lists every option.
+
+Only two options still need the network: `--tor` (installs tor from the package repositories, unless already installed) and `--admin-key github:USERNAME` (offline, pass a key file). On an offline server `vivant-ctl upgrade` can't reach GitHub and fails; upgrade with a new offline file instead.
 
 ## Windows / macOS
 

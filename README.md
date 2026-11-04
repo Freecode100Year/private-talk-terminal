@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 
 装好后用 `sudo vivant-ctl status | upgrade | uninstall` 管理；连不上时运行 `sudo vivant-ctl doctor`，它会逐项检查并告诉你怎么修。别忘了在云厂商的防火墙里放行 TCP 2222；域名在 Cloudflare 上要设为 DNS only（灰云）。也可以用 Docker 部署，见[部署与配置](docs/deploy.md#docker可选)。
 
-**服务器连不上 GitHub：** 用发布页里的离线包 `vivant-<版本>-linux-offline.tar.gz`，见[离线安装](docs/deploy.md#离线安装服务器连不上-github)。想在 Windows / macOS 上临时跑一个（测试、局域网），发布页也有对应的程序，见[部署与配置](docs/deploy.md#windows--macos)。
+**服务器连不上 GitHub：** 下载发布页里的离线一键安装包，在自己电脑上运行 `bash vivant-<版本>-linux-offline.sh --to root@服务器` 即可部署，见[离线安装](docs/deploy.md#离线安装服务器连不上-github)。想在 Windows / macOS 上临时跑一个（测试、局域网），发布页也有对应的程序，见[部署与配置](docs/deploy.md#windows--macos)。
 
 **从 Private-Talk Terminal 升级：** VIVANT 以前叫 Private-Talk Terminal（`ptterm`）。在旧服务器上运行一次上面的命令即可自动迁移，主机密钥、配置、封禁、洋葱地址都会保留，详见[部署与配置](docs/deploy.md#从-private-talk-terminal-迁移)。
 
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 - [x] **外部监控、口令设计原则**：写进文档（借鉴 devzat、ssh-chat、sshoosh）
 - [x] **安全审计后的加固**：只用现代 SSH 算法、剔除隐形字符和标签字符（附模糊测试）、TCP 总连接上限、没有生效封禁时自动换封禁密钥
 - [x] **改名 VIVANT**：旧服务器运行一键安装命令自动迁移
-- [x] **离线安装包**：服务器连不上 GitHub 时用；另附 Windows / macOS 程序供测试和局域网使用
+- [x] **离线一键安装**：一个自解压文件，`--to root@服务器` 从自己电脑直接部署；另附 Windows / macOS 程序供测试和局域网使用
 
 ## 文档
 

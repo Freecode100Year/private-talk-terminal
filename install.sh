@@ -92,9 +92,10 @@ ${C_B}VIVANT 安装器 · installer${C_0}
   --from-source      从源码编译，不下载发布版 · build from source instead of downloading a release
 
 离线安装 Offline install
-  在离线包解压出的目录里运行 ./install.sh，会直接使用同目录的程序（校验 SHA256），不联网。
-  Run ./install.sh from the unpacked vivant-<version>-linux-offline.tar.gz: it uses the binary
-  next to it (SHA256-verified) and needs no network. (--tor and --admin-key github:… still do.)
+  一键：sudo bash vivant-<版本>-linux-offline.sh [选项]，或在自己电脑上 bash vivant-<版本>-linux-offline.sh --to root@服务器
+  One click: sudo bash vivant-<version>-linux-offline.sh [options], or from your PC: … --to root@SERVER
+  它会解压出本脚本和程序，使用同目录的程序（校验 SHA256），不联网。(--tor 和 --admin-key github:… 仍需联网)
+  It unpacks this installer next to the binaries and uses them (SHA256-verified), no network. (--tor and --admin-key github:… still need it.)
   --no-firewall      不动 ufw/firewalld/iptables · don't touch ufw/firewalld/iptables
   --purge            配合 uninstall：连配置、主机密钥、管理员一起删除 · with uninstall: also delete config, host key and admins
 
@@ -279,7 +280,7 @@ build_from_source() {
 }
 
 # local_release uses the binary that sits next to this script (the offline
-# bundle vivant-<version>-linux-offline.tar.gz), verified like a download.
+# installer vivant-<version>-linux-offline.sh unpacks it there), verified like a download.
 # Returns 1 when there is none, e.g. when the script was piped from curl.
 local_release() {
 	local src="${BASH_SOURCE[0]:-}" dir asset=vivant-linux-$ARCH

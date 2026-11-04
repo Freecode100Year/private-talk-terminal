@@ -61,16 +61,22 @@ sudo vivant-ctl uninstall --purge # 彻底删除
 
 ## 离线安装（服务器连不上 GitHub）
 
-每次发布都附带离线包 `vivant-<版本>-linux-offline.tar.gz`，里面有三种架构的程序、安装脚本和校验文件。在能上网的电脑上从 [Releases](https://github.com/Freecode100Year/vivant/releases) 下载，传到服务器：
+每次发布都附带一个离线一键安装包 `vivant-<版本>-linux-offline.sh`：一个文件里包含三种架构的程序、安装脚本和校验文件，运行时不联网。在能上网的电脑上从 [Releases](https://github.com/Freecode100Year/vivant/releases) 下载，然后任选一种方式：
 
 ```bash
-scp vivant-v0.9.2-linux-offline.tar.gz root@服务器:
-# 在服务器上
-tar xzf vivant-v0.9.2-linux-offline.tar.gz && cd vivant-v0.9.2-linux-offline
-sudo ./install.sh                     # 参数和在线安装一样
+# 方式一：在自己电脑上一条命令部署到服务器（Linux、macOS，或 Windows 的 Git Bash / WSL）
+bash vivant-v0.9.3-linux-offline.sh --to root@服务器
+
+# 方式二：先把文件传到服务器，再在服务器上运行
+scp vivant-v0.9.3-linux-offline.sh root@服务器:
+sudo bash vivant-v0.9.3-linux-offline.sh
 ```
 
-安装脚本发现同目录里有程序，就直接用它（先按 `SHA256SUMS` 校验，不对就拒绝安装），全程不联网。升级时下载新的离线包再运行一次即可，配置和主机密钥会保留。仍然需要联网的只有：`--tor`（要从软件源装 tor，已装好则不用）和 `--admin-key github:用户名`（离线时请直接给公钥文件）。
+后面可以跟和在线安装一样的参数，例如 `--to root@服务器 --port 2222 --admin-key ~/.ssh/id_ed25519.pub`（方式一里公钥文件路径指的是服务器上的路径，离线时请先把公钥传上去，或用方式二）。`--to` 用的是你电脑上的 ssh/scp，服务器上的用户不是 root 时会自动用 sudo。
+
+安装包会先校验自身（下载不完整或被改动会直接拒绝），再解压出安装脚本和程序，安装脚本按 `SHA256SUMS` 再校验一次程序后安装，结束后删除临时文件。升级时下载新的离线包再运行一次即可，配置和主机密钥会保留。`bash vivant-…-linux-offline.sh --extract` 只解压不安装，`--help` 列出全部参数。
+
+仍然需要联网的只有：`--tor`（要从软件源装 tor，已装好则不用）和 `--admin-key github:用户名`（离线时请直接给公钥文件）。离线服务器上的 `vivant-ctl upgrade` 会因为连不上 GitHub 而失败，升级请用新的离线包。
 
 ## Windows / macOS
 

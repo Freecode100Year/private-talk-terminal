@@ -90,7 +90,7 @@ jobs:
           从 Private-Talk Terminal（ptterm）迁移：运行上面的一键命令即可，主机密钥、配置、封禁、洋葱地址都会保留。
           Migrating from Private-Talk Terminal (ptterm): run the command above; host key, config, bans and onion address are kept.
 
-          离线安装（服务器连不上 GitHub）· Offline install (server can't reach GitHub): download `vivant-<version>-linux-offline.tar.gz`, copy it to the server, then `tar xzf … && cd … && sudo ./install.sh`.
+          离线一键安装（服务器连不上 GitHub）· Offline one-click install (server can't reach GitHub): download `vivant-<version>-linux-offline.sh`, then either `bash vivant-<version>-linux-offline.sh --to root@SERVER` from your computer, or copy it over and run `sudo bash vivant-<version>-linux-offline.sh` on the server.
 
           Windows / macOS：`vivant-windows-*.exe`、`vivant-macos-*` 只适合本机测试或局域网，没有安装器、沙箱和开机自启 · for local testing or a LAN only — no installer, sandbox or autostart.
 

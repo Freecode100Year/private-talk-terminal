@@ -12,7 +12,7 @@ test:
 
 lint:
 	go vet ./...
-	shellcheck -S warning install.sh deploy/make-offline-bundle.sh
+	shellcheck -S warning install.sh deploy/make-offline-bundle.sh deploy/offline-header.sh
 	bash install.sh --print-unit | diff -u deploy/vivant.service -
 
 run: build
