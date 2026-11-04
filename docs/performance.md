@@ -1,6 +1,6 @@
 # 性能
 
-[← 返回 README](../README.md)
+[← 返回 README](../README.md) · 简体中文 | [English](performance.en.md)
 
 用自带的压测工具 `cmd/vivant-bench` 测量：所有人都在同一个房间，25 人各每 2 秒发一条消息（全房间约 12.5 条/秒），服务端限制为 **1 个 CPU 核**、`GOMEMLIMIT=600MiB`：
 

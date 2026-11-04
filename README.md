@@ -1,6 +1,8 @@
-# Private-Talk Terminal · 匿名终端聊天室
+# VIVANT · 匿名终端聊天室
 
-[![CI](https://github.com/Freecode100Year/private-talk-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/Freecode100Year/private-talk-terminal/actions/workflows/ci.yml)
+简体中文 | [English](README.en.md)
+
+[![CI](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml/badge.svg)](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml)
 
 一条 SSH 命令进入聊天室。不用注册、不用密码、不用装 App。
 
@@ -9,16 +11,18 @@ ssh -p 2222 guest@term.freedom8964.com
 ```
 
 ```
- PRIVATE-TALK TERMINAL                    Alice · 在线 3 · 运行 4d 12h · 18:34 CST
-房间 ▸#general 3   #chinese 0 +2   #english 0   #technology 0   #anonymous 0
+ VIVANT                         Alice · 在线 Online 3 · 运行 Up 4d 12h · 18:34 CST
+房间 ROOMS ▸#general 3   #chinese 0 +2   #english 0   #technology 0   #anonymous 0
 [18:32] <Alice> 大家晚上好！
 [18:33] <Ghost> Hello from New York!
 [18:33] <Anon42> 有人在学编程吗？@Alice
-[18:34] [私信 来自 Ghost] hi
-── #general · 3 人 · 大厅 · 什么都可以聊 ─────────────────────────────────────────
-> 说点什么…  /help 查看命令
-Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 · Ctrl+C 退出   ● CONNECTED
+[18:34] [私信 DM ← Ghost] hi
+── #general · 3 人在线 here · 大厅 · Lobby · 什么都可以聊 ─────────────────────────
+> 说点什么… Type a message…  /help 帮助 help
+Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 退出 quit   ● 已连接 CONNECTED
 ```
+
+所有提示、帮助和按键说明都同时显示简体中文和英文。
 
 ## 怎么连
 
@@ -29,7 +33,7 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 - **iSH Shell**：App Store 免费下载，先运行 `apk add openssh-client`，再运行上面的命令。
 - **Termius**：新建主机，地址 `term.freedom8964.com`，端口 `2222`，用户名 `guest`，密码留空。
 
-网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。界面语言按电脑的 `LANG` 自动选择；想要英文界面，把用户名换成 `en`，或进来后输入 `/lang en`。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
+网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
 
 ## 常用命令
 
@@ -57,10 +61,12 @@ Enter 发送 · ↑↓ 历史 · PgUp/PgDn 滚动 · Tab 补全 · Esc 清空 ·
 在一台 Linux VPS 上运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-terminal/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install.sh | sudo bash
 ```
 
-装好后用 `sudo ptterm-ctl status | upgrade | uninstall` 管理；连不上时运行 `sudo ptterm-ctl doctor`，它会逐项检查并告诉你怎么修。别忘了在云厂商的防火墙里放行 TCP 2222；域名在 Cloudflare 上要设为 DNS only（灰云）。也可以用 Docker 部署，见[部署与配置](docs/deploy.md#docker可选)。
+装好后用 `sudo vivant-ctl status | upgrade | uninstall` 管理；连不上时运行 `sudo vivant-ctl doctor`，它会逐项检查并告诉你怎么修。别忘了在云厂商的防火墙里放行 TCP 2222；域名在 Cloudflare 上要设为 DNS only（灰云）。也可以用 Docker 部署，见[部署与配置](docs/deploy.md#docker可选)。
+
+**从 Private-Talk Terminal 升级：** VIVANT 以前叫 Private-Talk Terminal（`ptterm`）。在旧服务器上运行一次上面的命令即可自动迁移，主机密钥、配置、封禁、洋葱地址都会保留，详见[部署与配置](docs/deploy.md#从-private-talk-terminal-迁移)。
 
 单核 1GB 的 VPS 大约能承载 2000 人同时在线。安装参数、管理员、配置项见[部署与配置](docs/deploy.md)。
 
@@ -71,20 +77,21 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/private-talk-termin
 - [x] **被 @、收到私聊时响铃**：默认开启，`/bell off` 关闭（借鉴 devzat）
 - [x] **人多时折叠进出提示**：合并成“3 人进入、2 人离开”（借鉴 ssh-chat `/quiet`）
 - [x] **备用 443 端口**：安装时加 `--alt-port 443`，给被防火墙拦住的用户一条路（借鉴 devzat）
-- [x] **核对主机指纹、`ssh chat` 短命令**：写进文档，`ptterm-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
+- [x] **核对主机指纹、`ssh chat` 短命令**：写进文档，`vivant-ctl status` 显示指纹（借鉴 ssh-chat、devzat）
 - [x] **Tor 出口 IP 共用宽松限额**：避免误伤用 Tor 浏览器直连的人（反向借鉴 devzat，它拒绝 Tor 用户）
-- [x] **按客户端语言只显示一种语言**：根据 `LANG` 自动选择，`/lang zh|en` 切换（借鉴 SSHChat）
-- [x] **`ptterm-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
+- [x] **界面中英双语**：所有提示、`/help`、按键说明、安装脚本输出同时标注简体中文和英文
+- [x] **`vivant-ctl doctor` 自检**：逐项检查服务、端口、防火墙、域名解析、Cloudflare 灰云（借鉴 sshoosh）
 - [x] **可选加固**：连接层读取限速、Docker 镜像（借鉴 ssh-chat、sshoosh）
 - [x] **握手超时**：30 秒内没进入聊天的连接直接断开，扫描器占不住名额；443 等知名端口在安装和 `doctor` 时给出提醒
 - [x] **外部监控、口令设计原则**：写进文档（借鉴 devzat、ssh-chat、sshoosh）
 - [x] **安全审计后的加固**：只用现代 SSH 算法、剔除隐形字符和标签字符（附模糊测试）、TCP 总连接上限、没有生效封禁时自动换封禁密钥
+- [x] **改名 VIVANT**：旧服务器运行一键安装命令自动迁移
 
 ## 文档
 
 - [连接与使用](docs/usage.md)：各平台连接方法、iPhone 详细步骤、全部命令、Tor
 - [安全与匿名性](docs/security.md)：部署者能看到什么、不能保证什么
-- [部署与配置](docs/deploy.md)：一键安装参数、管理员、配置项
+- [部署与配置](docs/deploy.md)：一键安装参数、迁移、管理员、配置项、Docker
 - [性能](docs/performance.md)：压测数据和设计
 - [开发](docs/development.md)：构建、测试、发布、代码结构、路线图
 
