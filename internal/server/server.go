@@ -37,8 +37,8 @@ import (
 	"charm.land/wish/v2"
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
-	"github.com/Freecode100Year/private-talk-terminal/internal/ui"
+	"github.com/Freecode100Year/vivant/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/ui"
 )
 
 // Options configures the SSH front-end.
@@ -315,19 +315,18 @@ func (s *Server) addrKey(addr net.Addr) string {
 func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 	return func(sess ssh.Session) {
 		if len(sess.Command()) > 0 || sess.Subsystem() != "" {
-			wish.Fatalln(sess, "This server only offers the chat room. Connect without a command:  ssh -p 2222 guest@<host>")
+			wish.Fatalln(sess, "这里只有聊天室，请不带命令连接 · This server only offers the chat room. Connect without a command:  ssh -p 2222 guest@<host>")
 			return
 		}
 		if cc, ok := sess.Context().Value(connKey).(*countedConn); ok {
 			cc.started.Store(true)
 		}
 		admin := s.isAdminUser(sess.User()) && s.isAdmin(sess.PublicKey())
-		lang := sessionLang(sess.User(), sess.Environ())
-		c, err := s.hub.ConnectLang(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin, lang)
+		c, err := s.hub.Connect(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin)
 		if err != nil {
-			msg := "Sorry: " + err.Error()
-			if zh, ok := refusalZh[err]; ok && s.hub.LangFor(lang) == "zh" {
-				msg = "抱歉：" + zh
+			msg := "抱歉 Sorry: " + err.Error()
+			if zh, ok := refusalZh[err]; ok {
+				msg = "抱歉：" + zh + " · Sorry: " + err.Error()
 			}
 			wish.Fatalln(sess, msg)
 			return
@@ -567,32 +566,4 @@ var refusalZh = map[error]string{
 	chat.ErrFull:         "服务器已满，请稍后再试",
 	chat.ErrTooManyConns: "你的地址连接数太多了",
 	chat.ErrConnRate:     "连接太频繁，请等一分钟",
-}
-
-// sessionLang picks the interface language: the login name "en"/"zh" (handy
-// on phones, whose SSH apps rarely send LANG), else the client's locale
-// (OpenSSH sends LANG/LC_* by default on most systems), else "" for the
-// server default. Only the language is used; the environment isn't stored.
-func sessionLang(user string, env []string) string {
-	switch strings.ToLower(user) {
-	case "en", "english":
-		return "en"
-	case "zh", "cn", "chinese":
-		return "zh"
-	}
-	vals := map[string]string{}
-	for _, kv := range env {
-		if k, v, ok := strings.Cut(kv, "="); ok && (k == "LC_ALL" || k == "LC_MESSAGES" || k == "LANG" || k == "LANGUAGE") {
-			vals[k] = v
-		}
-	}
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"} {
-		if v := vals[k]; v != "" {
-			if k == "LANGUAGE" { // colon-separated preference list
-				v, _, _ = strings.Cut(v, ":")
-			}
-			return v
-		}
-	}
-	return ""
 }

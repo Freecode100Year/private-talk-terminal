@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
 func decode(t *testing.T, in string) []key {

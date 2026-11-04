@@ -65,7 +65,7 @@ func (s *Server) refreshTorExits(ctx context.Context) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	fetch := func() {
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, torExitListURL, nil)
-		req.Header.Set("User-Agent", "private-talk-terminal")
+		req.Header.Set("User-Agent", "vivant")
 		resp, err := client.Do(req)
 		if err != nil {
 			s.log.Warn("tor exit list: fetch failed", "err", err)

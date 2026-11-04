@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
 func nickColor(n string) sgr {
@@ -23,18 +23,16 @@ type Formatter struct {
 	Styled bool
 	Self   func() string         // current nickname of the viewer
 	Loc    func() *time.Location // viewer's timezone (nil = server local)
-	Lang   func() string         // viewer's language: "zh" (default) or "en"
 }
 
-func (f Formatter) en() bool { return f.Lang != nil && f.Lang() == "en" }
+// bi joins a Chinese and an English text: every piece of interface text is
+// shown in both languages.
+func bi(zh, en string) string { return zh + " · " + en }
 
-// tr picks the Chinese or English string for the viewer.
-func (f Formatter) tr(zh, en string) string {
-	if f.en() {
-		return en
-	}
-	return zh
-}
+// joinWidth: a server message whose two halves fit in this many columns is
+// shown on one line ("中文 · English"); longer ones put the English on the
+// next line.
+const joinWidth = 78
 
 func (f Formatter) st(c sgr, s string) string {
 	if !f.Styled {
@@ -51,7 +49,6 @@ type renderKey struct {
 	id   uint64
 	loc  *time.Location
 	hist bool
-	en   bool
 }
 
 var (
@@ -93,7 +90,7 @@ func (f Formatter) Lines(ev chat.Event) []string {
 	if f.Loc != nil {
 		loc = f.Loc()
 	}
-	k := renderKey{id: ev.ID, loc: loc, hist: ev.History, en: f.en()}
+	k := renderKey{id: ev.ID, loc: loc, hist: ev.History}
 	if v, ok := renderCache.Load(k); ok {
 		return v.([]string)
 	}
@@ -104,16 +101,20 @@ func (f Formatter) Lines(ev chat.Event) []string {
 
 func (f Formatter) lines(ev chat.Event) []string {
 	if ev.History && f.Styled { // replayed history: whole line dimmed
-		lines := Formatter{Self: f.Self, Loc: f.Loc, Lang: f.Lang}.lines(ev)
+		lines := Formatter{Self: f.Self, Loc: f.Loc}.lines(ev)
 		for i := range lines {
 			lines[i] = sDim.R(lines[i])
 		}
 		return lines
 	}
-	if ev.En != "" && f.en() { // ev is a copy
-		ev.Text = ev.En
-		if ev.LinesEn != nil {
-			ev.Lines = ev.LinesEn
+	// Server messages carry both languages: join them, or move the English
+	// to its own line when the pair is long. ev is a copy.
+	var enLine string
+	if ev.En != "" && ev.En != ev.Text {
+		if ev.Kind == chat.KindSystem || width(ev.Text)+3+width(ev.En) <= joinWidth {
+			ev.Text = bi(ev.Text, ev.En)
+		} else {
+			enLine = ev.En
 		}
 	}
 	t := ev.Time
@@ -157,9 +158,9 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindSystem:
 		head = ts + f.st(sDim, "-- "+ev.Text)
 	case chat.KindDMIn:
-		head = ts + f.st(sDM, f.tr("[私信 来自 ", "[DM from ")+ev.From+"] ") + ev.Text
+		head = ts + f.st(sDM, "[私信 DM ← "+ev.From+"] ") + ev.Text
 	case chat.KindDMOut:
-		head = ts + f.st(sDM, f.tr("[私信 发给 ", "[DM to ")+ev.To+"] ") + ev.Text
+		head = ts + f.st(sDM, "[私信 DM → "+ev.To+"] ") + ev.Text
 	case chat.KindInfo:
 		head = ts + f.st(sInfo, "* "+ev.Text)
 	case chat.KindError:
@@ -167,20 +168,32 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindMention:
 		head = ts + f.st(sMention, "@ #"+ev.Room+" <"+ev.From+"> ") + ev.Text + f.st(sDim, "  · /join "+ev.Room)
 	case chat.KindNotice:
-		from := f.tr("系统", "System")
+		from := "系统 System"
 		if ev.From != "" {
-			from = f.tr("管理员 ", "Admin ") + ev.From
+			from = "管理员 Admin " + ev.From
 		}
 		head = ts + f.st(sNotice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
 	default:
 		head = ts + ev.Text
 	}
 	out := []string{head}
-	for _, l := range ev.Lines {
-		if ev.Kind == chat.KindInfo || ev.Kind == chat.KindError {
+	body := func(l string, en bool) {
+		switch {
+		case en:
+			out = append(out, "        "+f.st(sDim, l))
+		case ev.Kind == chat.KindInfo || ev.Kind == chat.KindError:
 			out = append(out, "        "+f.st(sInfo, l))
-		} else {
+		default:
 			out = append(out, "        "+l)
+		}
+	}
+	if enLine != "" {
+		body(enLine, true)
+	}
+	for i, l := range ev.Lines {
+		body(l, false)
+		if i < len(ev.LinesEn) && ev.LinesEn[i] != l {
+			body(ev.LinesEn[i], true)
 		}
 	}
 	return out

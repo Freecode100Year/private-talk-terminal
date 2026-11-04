@@ -1,4 +1,4 @@
-module github.com/Freecode100Year/private-talk-terminal
+module github.com/Freecode100Year/vivant
 
 go 1.26.8
 

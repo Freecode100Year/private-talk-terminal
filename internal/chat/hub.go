@@ -44,9 +44,9 @@ type Event struct {
 	To    string
 	Text  string
 	Lines []string // extra lines for multi-line info blocks
-	// En / LinesEn: the English version of a server message. Text/Lines
-	// hold Chinese. Each viewer's UI shows one language (/lang); user
-	// messages have no En.
+	// En / LinesEn: the English half of a server message (Text/Lines hold
+	// the Chinese). The UI always shows both. LinesEn nil means Lines are
+	// already bilingual or language-neutral. User messages have no En.
 	En      string
 	LinesEn []string
 	History bool   // replayed from the room buffer on join
@@ -85,8 +85,6 @@ type Config struct {
 	// join/leave lines are replaced by a periodic summary (FlushPresence).
 	// 0 = default (20); negative = never collapse.
 	QuietAbove int
-	// Lang is the UI language for clients that don't announce one ("zh" or "en").
-	Lang string
 }
 
 func (c *Config) defaults() {
@@ -128,9 +126,6 @@ func (c *Config) defaults() {
 	}
 	if c.MaxPrivate <= 0 {
 		c.MaxPrivate = 500
-	}
-	if c.Lang != "en" {
-		c.Lang = "zh"
 	}
 	if c.QuietAbove == 0 {
 		c.QuietAbove = 20
@@ -197,7 +192,6 @@ type Client struct {
 	seen        map[string]uint64 // room -> room.seq when the client last left/joined it
 	mentioned   map[string]bool   // rooms where the client was @mentioned while away
 	noBell      bool              // /bell off
-	lang        string            // "zh" or "en": which half of server messages the UI shows
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -268,12 +262,6 @@ func (h *Hub) Config() Config { return h.cfg }
 // Connect registers a new anonymous session coming from ipKey (an opaque,
 // already-hashed address key). The client starts in the first public room.
 func (h *Hub) Connect(ipKey string, admin bool) (*Client, error) {
-	return h.ConnectLang(ipKey, admin, "")
-}
-
-// ConnectLang is Connect with the client's preferred language ("zh", "en",
-// or "" for the server default).
-func (h *Hub) ConnectLang(ipKey string, admin bool, lang string) (*Client, error) {
 	now := time.Now()
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -323,7 +311,6 @@ func (h *Hub) ConnectLang(ipKey string, admin bool, lang string) (*Client, error
 		ignores:    map[uint64]bool{},
 		loc:        time.Local,
 		seen:       map[string]uint64{},
-		lang:       normLang(lang, h.cfg.Lang),
 		mentioned:  map[string]bool{},
 	}
 	for _, name := range h.public { // unread counts start from "now"
@@ -403,7 +390,7 @@ func (h *Hub) Janitor() {
 	if h.cfg.IdleKick > 0 {
 		for _, c := range h.clients {
 			if !c.admin && now.Sub(c.lastActive) > h.cfg.IdleKick {
-				h.removeLocked(c, c.L(fmt.Sprintf("%s 未发言，已断开", h.cfg.IdleKick), fmt.Sprintf("idle for %s", h.cfg.IdleKick)), "timed out")
+				h.removeLocked(c, bi(fmt.Sprintf("%s 未发言，已断开", h.cfg.IdleKick), fmt.Sprintf("idle for %s", h.cfg.IdleKick)), "timed out")
 			}
 		}
 	}
@@ -499,8 +486,6 @@ func (h *Hub) command(c *Client, line string) Result {
 	case "report":
 		target, reason, _ := strings.Cut(rest, " ")
 		h.reportLocked(c, strings.TrimPrefix(target, "@"), reason)
-	case "lang", "language", "语言":
-		h.langLocked(c, rest)
 	case "bell":
 		h.bellLocked(c, rest)
 	case "privacy", "policy":
@@ -526,109 +511,111 @@ func (h *Hub) command(c *Client, line string) Result {
 
 // helpLocked shows the handful of commands people actually need; everything
 // else is one step away under "/help all", so newcomers aren't handed a manual.
+// helpRow is one /help line: the command, then its description in Chinese
+// and English. An empty cmd makes a section heading.
+type helpRow struct{ cmd, zh, en string }
+
+func helpLines(rows []helpRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.cmd == "" {
+			out = append(out, "── "+r.zh+" · "+r.en+" ──")
+			continue
+		}
+		out = append(out, padRight(r.cmd, 30)+r.zh+" · "+r.en)
+	}
+	return out
+}
+
+// padRight pads s with spaces to n terminal columns (CJK counts as 2).
+func padRight(s string, n int) string {
+	w := 0
+	for _, r := range s {
+		if r >= 0x1100 && (r <= 0x115f || r >= 0x2e80 && r <= 0xa4cf || r >= 0xac00 && r <= 0xd7a3 || r >= 0xf900 && r <= 0xfaff || r >= 0xfe30 && r <= 0xfe4f || r >= 0xff00 && r <= 0xff60 || r >= 0xffe0 && r <= 0xffe6) {
+			w += 2
+		} else {
+			w++
+		}
+	}
+	if w >= n {
+		return s + " "
+	}
+	return s + strings.Repeat(" ", n-w)
+}
+
 func (h *Hub) helpLocked(c *Client, arg string) {
 	if a := strings.ToLower(strings.TrimSpace(arg)); a != "all" && a != "more" && a != "全部" {
-		c.send(&Event{Kind: KindInfo,
-			Text: "常用命令（直接打字就是发言）", Lines: []string{
-				"/rooms              有哪些房间",
-				"/join <房间>        进入房间，如 /join chinese",
-				"/msg <昵称> <内容>  私聊",
-				"/nick <名字>        改昵称",
-				"/who                谁在这里",
-				"/quit               退出",
-				"/help all           全部命令：私人房间、屏蔽、隐私、语言…",
-			},
-			En: "Everyday commands (just type to talk)", LinesEn: []string{
-				"/rooms              list rooms",
-				"/join <room>        join a room, e.g. /join english",
-				"/msg <nick> <text>  private message",
-				"/nick <name>        change your nickname",
-				"/who                who is here",
-				"/quit               leave",
-				"/help all           everything else: private rooms, ignoring, privacy, language…",
-			}})
+		c.send(&Event{Kind: KindInfo, Text: "常用命令（直接打字就是发言）", En: "Everyday commands (just type to talk)",
+			Lines: helpLines([]helpRow{
+				{"/rooms", "有哪些房间", "list rooms"},
+				{"/join <房间 room>", "进入房间", "join a room"},
+				{"/msg <昵称 nick> <内容 text>", "私聊", "private message"},
+				{"/nick <名字 name>", "改昵称", "change nickname"},
+				{"/who", "谁在这里", "who is here"},
+				{"/quit", "退出", "leave"},
+				{"/help all", "全部命令", "all commands"},
+			})})
 		return
 	}
-	zh := []string{
-		"── 聊天 ──",
-		"/msg <昵称> <内容>   私聊；/r <内容> 回复上一个私信你的人",
-		"/me <动作>           动作消息，如 /me 挥手",
-		"/nick <名字>         改昵称（2–16 字，中文可以）",
-		"//text               发送以 / 开头的文字",
-		"── 房间 ──",
-		"/rooms  /join <房间>  /leave   房间栏 +N 未读，@N 有人 @你",
-		"/create              私人房间，凭房间码进入，没人时自动销毁",
-		"/who                 当前房间的人",
-		"── 隐私与安全 ──",
-		"/privacy             本服务器存什么、不存什么",
-		"/forget              从服务器删除你发过的消息",
-		"/ignore <昵称>       屏蔽某人（/unignore 取消）",
-		"/report <昵称> <原因> 举报给管理员",
-		"── 其他 ──",
-		"/lang zh|en          界面语言",
-		"/tz <时区>           按你的时区显示时间，如 /tz +8",
-		"/bell on|off         被 @ 或收到私聊时响铃（默认开）",
-		"/clear  /quit",
-	}
-	en := []string{
-		"── chat ──",
-		"/msg <nick> <text>   private message; /r <text> replies to the last one",
-		"/me <action>         action message, e.g. /me waves",
-		"/nick <name>         change nickname (2–16 characters)",
-		"//text               send text starting with /",
-		"── rooms ──",
-		"/rooms  /join <room>  /leave   rooms bar: +N unread, @N you were mentioned",
-		"/create              private room, joined by code, gone when empty",
-		"/who                 who is in this room",
-		"── privacy & safety ──",
-		"/privacy             what this server keeps and doesn't",
-		"/forget              erase your messages from the server",
-		"/ignore <nick>       hide someone (/unignore to undo)",
-		"/report <nick> <why> report to moderators",
-		"── other ──",
-		"/lang zh|en          interface language",
-		"/tz <zone>           show times in your timezone, e.g. /tz Europe/Berlin",
-		"/bell on|off         bell on mentions and private messages (on by default)",
-		"/clear  /quit",
+	rows := []helpRow{
+		{"", "聊天", "chat"},
+		{"/msg <昵称 nick> <内容 text>", "私聊", "private message"},
+		{"/r <内容 text>", "回复上一个私信你的人", "reply to the last private message"},
+		{"/me <动作 action>", "动作消息，如 /me 挥手", "action message, e.g. /me waves"},
+		{"/nick <名字 name>", "改昵称（2–16 字，中文可以）", "change nickname (2–16 characters)"},
+		{"//text", "发送以 / 开头的文字", "send text starting with /"},
+		{"", "房间", "rooms"},
+		{"/rooms", "房间列表；房间栏 +N 未读，@N 有人 @你", "room list; the bar shows +N unread, @N mentions"},
+		{"/join <房间 room>  /leave", "进入、离开房间", "join or leave a room"},
+		{"/create", "私人房间，凭房间码进入，没人时自动销毁", "private room, joined by code, gone when empty"},
+		{"/who", "当前房间的人", "who is in this room"},
+		{"", "隐私与安全", "privacy & safety"},
+		{"/privacy", "本服务器存什么、不存什么", "what this server keeps and doesn't"},
+		{"/forget", "从服务器删除你发过的消息", "erase your messages from the server"},
+		{"/ignore <昵称 nick>", "屏蔽某人（/unignore 取消）", "hide someone (/unignore to undo)"},
+		{"/report <昵称 nick> <原因 why>", "举报给管理员", "report to moderators"},
+		{"", "其他", "other"},
+		{"/tz <时区 zone>", "按你的时区显示时间，如 /tz +8", "show times in your timezone, e.g. /tz -5"},
+		{"/bell on|off", "被 @ 或收到私聊时响铃（默认开）", "bell on mentions and private messages (default on)"},
+		{"/clear  /quit", "清屏、退出", "clear the screen, leave"},
 	}
 	if c.admin {
-		zh = append(zh, "── 管理员 ──",
-			"/kick <昵称> [原因]  /mute <昵称> [分钟]  /unmute <昵称>",
-			"/ban <昵称> [分钟]   /bans  /unban <id>  /unbanall",
-			"/broadcast <内容>    /topic <内容>  /reports")
-		en = append(en, "── admin ──",
-			"/kick <nick> [reason]  /mute <nick> [min]  /unmute <nick>",
-			"/ban <nick> [min]      /bans  /unban <id>  /unbanall",
-			"/broadcast <text>      /topic <text>  /reports")
+		rows = append(rows,
+			helpRow{"", "管理员", "admin"},
+			helpRow{"/kick <昵称 nick> [原因 reason]", "踢出", "kick"},
+			helpRow{"/mute <昵称 nick> [分钟 min]", "禁言（/unmute 解除）", "mute (/unmute to undo)"},
+			helpRow{"/ban <昵称 nick> [分钟 min]", "按地址封禁", "ban by address"},
+			helpRow{"/bans  /unban <id>  /unbanall", "封禁列表、解封", "list and lift bans"},
+			helpRow{"/broadcast <内容 text>", "全服公告", "announcement to everyone"},
+			helpRow{"/topic <内容 text>", "设置房间主题", "set the room topic"},
+			helpRow{"/reports", "查看举报", "view reports"})
 	}
-	c.send(&Event{Kind: KindInfo, Text: "全部命令", Lines: zh, En: "All commands", LinesEn: en})
+	c.send(&Event{Kind: KindInfo, Text: "全部命令", En: "All commands", Lines: helpLines(rows)})
 }
 
 func (h *Hub) roomsLocked(c *Client) {
-	var lines, linesEn []string
+	var lines []string
 	for _, name := range h.public {
 		r := h.rooms[name]
 		mark := "  "
 		if c.room == name {
 			mark = "▸ "
 		}
-		extra, extraEn := "", ""
+		extra := ""
 		if n := r.seq - c.seen[name]; c.room != name && n > 0 {
-			extra, extraEn = fmt.Sprintf("  （%d 条新消息", n), fmt.Sprintf("  (%d new", n)
+			extra = fmt.Sprintf("  （%d 条新消息 new", n)
 			if c.mentioned[name] {
-				extra, extraEn = extra+"，有人 @你", extraEn+", @you"
+				extra += "，有人 @你 · @you"
 			}
-			extra, extraEn = extra+"）", extraEn+")"
+			extra += "）"
 		}
-		lines = append(lines, fmt.Sprintf("%s#%-12s %3d   %s%s", mark, name, len(r.members), r.topic, extra))
-		linesEn = append(linesEn, fmt.Sprintf("%s#%-12s %3d   %s%s", mark, name, len(r.members), r.topicFor("en"), extraEn))
+		lines = append(lines, fmt.Sprintf("%s#%-12s %3d   %s%s", mark, name, len(r.members), r.topicBi(), extra))
 	}
 	if r := h.rooms[c.room]; r != nil && r.private {
-		lines = append(lines, fmt.Sprintf("▸ %s（私人房间）%d 人", h.roomLabel(c.room), len(r.members)))
-		linesEn = append(linesEn, fmt.Sprintf("▸ %s (private) %d here", h.roomLabel(c.room), len(r.members)))
+		lines = append(lines, fmt.Sprintf("▸ %s（私人房间 · private）%d", h.roomLabel(c.room), len(r.members)))
 	}
 	c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("房间 · 共 %d 人在线", len(h.clients)), Lines: lines,
-		En: fmt.Sprintf("Rooms · %d online", len(h.clients)), LinesEn: linesEn})
+		En: fmt.Sprintf("Rooms · %d online", len(h.clients))})
 }
 
 func (h *Hub) cmdJoinLocked(c *Client, name string) {
@@ -695,7 +682,10 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	}
 	h.presenceLocked(r, c.nick, "joined", true) // tell the others; the joiner gets "Now in …"
 	r.members[c.ID] = c
-	topic, topicEn := r.topic, r.topicFor("en")
+	topic, topicEn := r.topic, r.topicEn
+	if topicEn == "" {
+		topicEn = r.topic
+	}
 	if r.private {
 		topic, topicEn = "私人房间", "private room"
 	}
@@ -847,7 +837,7 @@ func (h *Hub) nickLocked(c *Client, n string) {
 			o.lastDMFrom = n
 		}
 	}
-	h.roomSystemLocked(h.rooms[c.room], fmt.Sprintf("%s 改名为 %s", old, n), fmt.Sprintf("%s is now known as %s", old, n))
+	h.roomSystemLocked(h.rooms[c.room], fmt.Sprintf("%s 改名为 %s", old, n), "renamed")
 }
 
 func (h *Hub) whoLocked(c *Client) {
@@ -870,7 +860,7 @@ func (h *Hub) whoLocked(c *Client) {
 	if more > 0 {
 		lines = append(lines, fmt.Sprintf("  … +%d", more))
 	}
-	c.send(&Event{Kind: KindInfo, Lines: lines, LinesEn: lines,
+	c.send(&Event{Kind: KindInfo, Lines: lines,
 		Text: fmt.Sprintf("%s 里有 %d 人 · 共 %d 人在线", h.roomLabel(c.room), len(r.members), len(h.clients)),
 		En:   fmt.Sprintf("%d in %s · %d online total", len(r.members), h.roomLabel(c.room), len(h.clients))})
 }
@@ -911,7 +901,7 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 		for _, k := range keys {
 			lines = append(lines, fmt.Sprintf("  %s   %s", banID(k), time.Until(h.bans[k]).Round(time.Minute)))
 		}
-		c.send(&Event{Kind: KindInfo, Lines: lines, LinesEn: lines,
+		c.send(&Event{Kind: KindInfo, Lines: lines,
 			Text: fmt.Sprintf("%d 条封禁（id 是匿名地址哈希，后面是剩余时间）· /unban <id>", len(keys)),
 			En:   fmt.Sprintf("%d active bans (id = anonymous address hash, then time left) · /unban <id>", len(keys))})
 		return
@@ -933,13 +923,13 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 			return
 		}
 		c.send(&Event{Kind: KindInfo, Text: fmt.Sprintf("最近 %d 条举报", len(h.reports)), En: fmt.Sprintf("%d recent reports", len(h.reports)),
-			Lines: append([]string(nil), h.reports...), LinesEn: append([]string(nil), h.reports...)})
+			Lines: append([]string(nil), h.reports...)})
 		return
 	case "topic":
 		r := h.rooms[c.room]
 		r.topic = Sanitize(rest, 80)
 		r.topicEn = r.topic
-		h.roomSystemLocked(r, "房间主题改为："+r.topic, "Topic set to: "+r.topic)
+		h.roomSystemLocked(r, "房间主题改为："+r.topic, "topic changed")
 		return
 	}
 	t := h.byNick[strings.ToLower(strings.TrimPrefix(arg, "@"))]
@@ -955,9 +945,9 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 	fmt.Sscanf(tail, "%d", &minutes)
 	switch cmd {
 	case "kick":
-		reason := t.L("被管理员踢出", "kicked by admin")
+		reason := bi("被管理员踢出", "kicked by admin")
 		if tail != "" {
-			reason = t.L("被踢出：", "kicked: ") + Sanitize(tail, 120)
+			reason = bi("被踢出", "kicked") + "：" + Sanitize(tail, 120)
 		}
 		h.removeLocked(t, reason, "was kicked")
 	case "mute":
@@ -974,7 +964,7 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 		h.infof(c, "已解除 %s 的禁言。", "Unmuted %s.", t.nick)
 	case "ban":
 		if t.ipKey == OnionKey { // banning the shared Tor key would lock out every Tor user
-			h.removeLocked(t, t.L("被管理员踢出", "kicked by admin"), "was kicked")
+			h.removeLocked(t, bi("被管理员踢出", "kicked by admin"), "was kicked")
 			h.infof(c, "%s 通过 Tor 连接，无法按地址封禁，已改为踢出。屡犯可用 /mute。", "%s came via Tor and can't be banned by address — kicked instead. Use /mute for repeat offenders.", arg)
 			return
 		}
@@ -986,7 +976,7 @@ func (h *Hub) adminLocked(c *Client, cmd, rest string) {
 		key := t.ipKey
 		for _, o := range h.clients {
 			if o.ipKey == key && !o.admin {
-				h.removeLocked(o, o.L(fmt.Sprintf("被封禁 %d 分钟", minutes), fmt.Sprintf("banned for %d min", minutes)), "was banned")
+				h.removeLocked(o, bi(fmt.Sprintf("被封禁 %d 分钟", minutes), fmt.Sprintf("banned for %d min", minutes)), "was banned")
 			}
 		}
 		h.infof(c, "已封禁 %s 的地址 %d 分钟。", "Banned %s's address for %d min.", arg, minutes)
@@ -1047,7 +1037,7 @@ func (h *Hub) reportLocked(c *Client, nick, reason string) {
 	for _, o := range h.clients {
 		if o.admin {
 			admins++
-			o.send(&Event{Kind: KindNotice, Text: "举报", En: "Report", Lines: []string{line}, LinesEn: []string{line}})
+			o.send(&Event{Kind: KindNotice, Text: "举报", En: "Report", Lines: []string{line}})
 		}
 	}
 	if admins > 0 {
@@ -1136,12 +1126,12 @@ func (h *Hub) tzLocked(c *Client, arg string) {
 // instead, so arrivals and departures don't drown the conversation. Kicks
 // and bans are never collapsed: moderation stays visible.
 var presenceText = map[string][2]string{
-	"joined":                {"%s 进入了房间", "%s joined"},
-	"left":                  {"%s 离开了", "%s left"},
-	"left for another room": {"%s 去了别的房间", "%s left for another room"},
-	"timed out":             {"%s 长时间未发言，已断开", "%s timed out"},
-	"was kicked":            {"%s 被管理员踢出", "%s was kicked"},
-	"was banned":            {"%s 被管理员封禁", "%s was banned"},
+	"joined":                {"%s 进入了房间", "joined"},
+	"left":                  {"%s 离开了", "left"},
+	"left for another room": {"%s 去了别的房间", "left for another room"},
+	"timed out":             {"%s 长时间未发言，已断开", "timed out"},
+	"was kicked":            {"%s 被管理员踢出", "was kicked"},
+	"was banned":            {"%s 被管理员封禁", "was banned"},
 }
 
 func (h *Hub) presenceLocked(r *room, nick, verb string, collapsible bool) {
@@ -1158,9 +1148,9 @@ func (h *Hub) presenceLocked(r *room, nick, verb string, collapsible bool) {
 	}
 	t, ok := presenceText[verb]
 	if !ok {
-		t = [2]string{"%s " + verb, "%s " + verb}
+		t = [2]string{"%s " + verb, verb}
 	}
-	h.roomSystemLocked(r, fmt.Sprintf(t[0], nick), fmt.Sprintf(t[1], nick))
+	h.roomSystemLocked(r, fmt.Sprintf(t[0], nick), t[1])
 }
 
 // FlushPresence posts the collapsed join/leave summary of busy rooms. Call it
@@ -1361,60 +1351,16 @@ func (h *Hub) errorf(c *Client, zh, en string, a ...any) {
 	c.send(&Event{Kind: KindError, Text: fmt.Sprintf(zh, a...), En: fmt.Sprintf(en, a...)})
 }
 
-// L picks the client's language for text that isn't an Event (e.g. a
-// disconnect reason).
-func (c *Client) L(zh, en string) string {
-	if c.lang == "en" {
-		return en
+// bi joins the Chinese and English halves of a short text that isn't an
+// Event (e.g. a disconnect reason).
+func bi(zh, en string) string { return zh + " · " + en }
+
+// topicBi is the room topic in both languages.
+func (r *room) topicBi() string {
+	if r.topicEn == "" || r.topicEn == r.topic {
+		return r.topic
 	}
-	return zh
-}
-
-// normLang maps a locale such as "zh_CN.UTF-8", "en_US" or "" to "zh"/"en".
-func normLang(v, def string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	switch {
-	case strings.HasPrefix(v, "zh"):
-		return "zh"
-	case v == "", v == "c", v == "posix", strings.HasPrefix(v, "c."):
-		if def == "en" {
-			return "en"
-		}
-		return "zh"
-	default:
-		return "en"
-	}
-}
-
-func (r *room) topicFor(lang string) string {
-	if lang == "en" && r.topicEn != "" {
-		return r.topicEn
-	}
-	return r.topic
-}
-
-func (h *Hub) langLocked(c *Client, arg string) {
-	switch strings.ToLower(strings.TrimSpace(arg)) {
-	case "zh", "cn", "中文", "chinese":
-		c.lang = "zh"
-	case "en", "english", "英文":
-		c.lang = "en"
-	default:
-		h.infof(c, "界面语言：中文。切换：/lang en", "Interface language: English. Switch: /lang zh")
-		return
-	}
-	h.infof(c, "界面语言已切换为中文。", "Interface language set to English.")
-}
-
-// LangFor resolves a client locale ("zh_CN.UTF-8", "en", "") to "zh"/"en"
-// using the server default.
-func (h *Hub) LangFor(locale string) string { return normLang(locale, h.cfg.Lang) }
-
-// Lang returns the client's interface language ("zh" or "en").
-func (h *Hub) Lang(c *Client) string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return c.lang
+	return bi(r.topic, r.topicEn)
 }
 
 func (h *Hub) pruneHistory(hist []Event, now time.Time) []Event {
@@ -1483,8 +1429,7 @@ type Status struct {
 	Uptime    time.Duration
 	Admin     bool
 	Muted     bool
-	Bell      bool   // ring on @mentions and private messages
-	Lang      string // "zh" or "en"
+	Bell      bool // ring on @mentions and private messages
 	Loc       *time.Location
 }
 
@@ -1501,14 +1446,13 @@ func (h *Hub) Status(c *Client) Status {
 		Muted:  !c.mutedUntil.IsZero() && time.Now().Before(c.mutedUntil),
 		Loc:    c.loc,
 		Bell:   !c.noBell,
-		Lang:   c.lang,
 	}
 	s.RoomLabel = h.roomLabel(c.room)
 	if r := h.rooms[c.room]; r != nil {
 		s.RoomUsers = len(r.members)
-		s.Topic = r.topicFor(c.lang)
+		s.Topic = r.topicBi()
 		if r.private {
-			s.Topic = c.L("私人房间", "private room")
+			s.Topic = bi("私人房间", "private room")
 		}
 	}
 	for _, name := range h.public {

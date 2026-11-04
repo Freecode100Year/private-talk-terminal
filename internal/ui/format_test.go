@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
 func TestMentions(t *testing.T) {
@@ -56,18 +56,15 @@ func TestRings(t *testing.T) {
 	}
 }
 
-func TestFormatterLanguage(t *testing.T) {
-	ev := chat.Event{ID: 987654, Kind: chat.KindSystem, Room: "general", Text: "小明 进入了房间", En: "小明 joined"}
-	zh := Formatter{Styled: true}.Lines(ev)[0]
-	en := Formatter{Styled: true, Lang: func() string { return "en" }}.Lines(ev)[0]
-	if !strings.Contains(zh, "进入了房间") || strings.Contains(zh, "joined") {
-		t.Fatalf("zh rendering %q", zh)
+func TestFormatterBilingual(t *testing.T) {
+	short := chat.Event{ID: 987654, Kind: chat.KindSystem, Room: "general", Text: "小明 进入了房间", En: "joined"}
+	if l := (Formatter{Styled: true}).Lines(short); len(l) != 1 || !strings.Contains(l[0], "小明 进入了房间 · joined") {
+		t.Fatalf("short pair not joined: %q", l)
 	}
-	if !strings.Contains(en, "joined") || strings.Contains(en, "进入") {
-		t.Fatalf("en rendering %q (render cache must be per language)", en)
-	}
-	info := chat.Event{Kind: chat.KindInfo, Text: "标题", Lines: []string{"一"}, En: "Title", LinesEn: []string{"one"}}
-	if l := (Formatter{Lang: func() string { return "en" }}).Lines(info); !strings.HasSuffix(l[0], "* Title") || !strings.HasSuffix(l[1], "one") {
-		t.Fatalf("en info %q", l)
+	long := chat.Event{Kind: chat.KindInfo, Text: strings.Repeat("中", 30), En: strings.Repeat("e", 40),
+		Lines: []string{"一"}, LinesEn: []string{"one"}}
+	l := (Formatter{}).Lines(long)
+	if len(l) != 4 || !strings.HasSuffix(l[1], strings.Repeat("e", 40)) || !strings.HasSuffix(l[2], "一") || !strings.HasSuffix(l[3], "one") {
+		t.Fatalf("long pair layout %q", l)
 	}
 }

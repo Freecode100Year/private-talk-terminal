@@ -20,7 +20,7 @@ internal/ui/term.go         完整界面：轻量终端渲染器 + 按键解码
 internal/ui/plain.go        纯文本行模式
 internal/ui/format.go       消息格式、时区、@提及
 internal/server/            Wish SSH 网关、认证、连接限制、封禁持久化
-cmd/ptt-bench/              压测工具
+cmd/vivant-bench/              压测工具
 deploy/                     systemd 单元（由 install.sh --print-unit 生成）和配置示例
 ```
 

@@ -16,7 +16,7 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
 func startServer(t *testing.T) string {
@@ -308,27 +308,6 @@ func TestTorExitsShareTorBucket(t *testing.T) {
 	}
 	if srv.keyFor(local, normal) == OnionKey {
 		t.Fatal("ordinary address mapped to the Tor bucket")
-	}
-}
-
-func TestSessionLang(t *testing.T) {
-	cases := []struct {
-		user string
-		env  []string
-		want string
-	}{
-		{"guest", nil, ""},
-		{"en", []string{"LANG=zh_CN.UTF-8"}, "en"},
-		{"zh", nil, "zh"},
-		{"guest", []string{"LANG=en_US.UTF-8"}, "en_US.UTF-8"},
-		{"guest", []string{"LANG=en_US.UTF-8", "LC_ALL=zh_CN.UTF-8"}, "zh_CN.UTF-8"},
-		{"guest", []string{"LANGUAGE=de:en", "LANG=C"}, "de"},
-		{"guest", []string{"TERM=xterm"}, ""},
-	}
-	for _, c := range cases {
-		if got := sessionLang(c.user, c.env); got != c.want {
-			t.Errorf("sessionLang(%q, %v) = %q, want %q", c.user, c.env, got, c.want)
-		}
 	}
 }
 

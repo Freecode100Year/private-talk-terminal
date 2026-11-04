@@ -1,11 +1,11 @@
-// Command ptt-bench is a load generator for Private-Talk Terminal. It opens
+// Command vivant-bench is a load generator for VIVANT. It opens
 // N SSH sessions (line mode), has a fraction of them chat at a fixed rate and
 // measures how long each message takes to reach every other session.
 //
 // Run the server with relaxed limits first, e.g.
 //
-//	ptterm -addr 127.0.0.1:2222 -max-per-ip 100000 -max-tcp-per-ip 100000 -conn-per-min 100000 -max-clients 100000 -msg-rate 100 -msg-burst 100
-//	ptt-bench -addr 127.0.0.1:2222 -clients 500 -senders 50 -rate 0.5 -duration 30s
+//	vivant -addr 127.0.0.1:2222 -max-per-ip 100000 -max-tcp-per-ip 100000 -conn-per-min 100000 -max-clients 100000 -msg-rate 100 -msg-burst 100
+//	vivant-bench -addr 127.0.0.1:2222 -clients 500 -senders 50 -rate 0.5 -duration 30s
 package main
 
 import (

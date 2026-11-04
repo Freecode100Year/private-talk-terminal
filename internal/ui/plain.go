@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/Freecode100Year/private-talk-terminal/internal/chat"
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
 // Plain runs a line-mode session: no colours, no cursor movement, no
@@ -20,7 +20,7 @@ import (
 // otherwise the client's own terminal handles line editing.
 func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width int) {
 	p := &plain{w: rw, hub: hub, c: c, pty: hasPty, width: width}
-	p.fmt = Formatter{Styled: false, Self: func() string { return hub.Nick(c) }, Loc: func() *time.Location { return hub.Loc(c) }, Lang: func() string { return hub.Lang(c) }}
+	p.fmt = Formatter{Styled: false, Self: func() string { return hub.Nick(c) }, Loc: func() *time.Location { return hub.Loc(c) }}
 	p.nl = "\n"
 	if hasPty {
 		p.nl = "\r\n"
@@ -28,7 +28,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 	if p.width <= 0 {
 		p.width = 80
 	}
-	p.write(p.fmt.tr("PRIVATE-TALK TERMINAL（纯文本模式）· /help 帮助 · /quit 退出", "PRIVATE-TALK TERMINAL (plain mode) · /help · /quit") + p.nl)
+	p.write("VIVANT（纯文本模式 plain mode）· /help 帮助 help · /quit 退出 quit" + p.nl)
 
 	lines := make(chan string)
 	quit := make(chan struct{})
@@ -47,7 +47,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 			}
 		case <-c.Done:
 			if r := c.Reason(); r != "" {
-				p.printRaw(p.fmt.tr("已断开：", "Disconnected: ") + r)
+				p.printRaw("已断开 Disconnected: " + r)
 			}
 			return
 		case <-quit:
@@ -55,7 +55,7 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 		case line := <-lines:
 			res := hub.Handle(c, line)
 			if res.Quit {
-				p.printRaw(p.fmt.tr("再见！", "Bye!"))
+				p.printRaw("再见！Bye!")
 				return
 			}
 			p.drawPrompt()
