@@ -189,7 +189,7 @@ func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	opts := []ssh.Option{
 		wish.WithAddress(opt.Addr),
 		wish.WithHostKeyPath(opt.HostKeyPath),
-		wish.WithVersion("PrivateTalk"),
+		wish.WithVersion("VIVANT"),
 		// Only reached by the admin username (everyone else is accepted at
 		// "none"): require a listed key, refuse every other method.
 		wish.WithPublicKeyAuth(func(ctx ssh.Context, key ssh.PublicKey) bool {

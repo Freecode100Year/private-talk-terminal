@@ -196,6 +196,25 @@ func TestAdminRequiresKey(t *testing.T) {
 	if err := try("admin", gossh.KeyboardInteractive(func(string, string, []string, []bool) ([]string, error) { return nil, nil })); err == nil {
 		t.Fatal("admin username accepted via keyboard-interactive")
 	}
+	for _, u := range []string{"ADMIN", "Admin"} { // case doesn't open a keyless path
+		if err := try(u); err == nil {
+			t.Fatalf("%q accepted without a key", u)
+		}
+	}
+	// Look-alike names are ordinary users: accepted at "none" (no key is
+	// even asked for), so they never become admins, key or not.
+	for _, u := range []string{"admin\x00", "admin ", " admin", "аdmin" /* Cyrillic а */} {
+		c, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{User: u, Auth: []gossh.AuthMethod{gossh.PublicKeys(adminSigner)},
+			HostKeyCallback: gossh.InsecureIgnoreHostKey(), Timeout: 5 * time.Second})
+		if err != nil {
+			t.Fatalf("%q: %v", u, err)
+		}
+		in, out := plainSession(t, c)
+		waitFor(t, out, "已进入")
+		io.WriteString(in, "/bans\n")
+		waitFor(t, out, "没有 /bans 这个命令") // not an admin
+		c.Close()
+	}
 }
 
 func testSigner(t *testing.T) gossh.Signer {
