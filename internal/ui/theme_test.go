@@ -9,28 +9,9 @@ import (
 	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
-// xterm256 returns the standard RGB value of a 256-colour index (16–255;
-// 0–15 are user-configurable and deliberately unused by the themes).
-func xterm256(n int) (r, g, b float64) {
-	switch {
-	case n >= 232:
-		v := float64(8 + (n-232)*10)
-		return v, v, v
-	case n >= 16:
-		n -= 16
-		lv := func(i int) float64 {
-			if i == 0 {
-				return 0
-			}
-			return float64(55 + i*40)
-		}
-		return lv(n / 36), lv(n / 6 % 6), lv(n % 6)
-	}
-	panic("system colour used in a theme")
-}
-
 func luminance(n int) float64 {
-	r, g, b := xterm256(n)
+	ri, gi, bi := xterm256(n)
+	r, g, b := float64(ri), float64(gi), float64(bi)
 	lin := func(c float64) float64 {
 		c /= 255
 		if c <= 0.03928 {
@@ -79,6 +60,15 @@ func TestThemeContrast(t *testing.T) {
 		if c := contrast(th.Mention.bg, th.bg); c < 2 {
 			t.Errorf("%s: mention band vs background %.2f:1, too close", th.Name, c)
 		}
+	}
+}
+
+func TestThemeDefaults(t *testing.T) {
+	if got := themeGreen.Defaults; got != "\x1b]10;#000000\x07\x1b]11;#d7ffd7\x07" {
+		t.Fatalf("green OSC %q", got)
+	}
+	if hex256(24) != "#005f87" || hex256(250) != "#bcbcbc" {
+		t.Fatal("hex256")
 	}
 }
 

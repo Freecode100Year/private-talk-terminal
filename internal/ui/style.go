@@ -46,9 +46,10 @@ func (p paint) R(s string) string {
 // background; it is written wherever a plain reset would be, so the
 // background stays painted.
 type Theme struct {
-	Name   string
-	fg, bg int
-	Base   string
+	Name     string
+	fg, bg   int
+	Base     string
+	Defaults string // sets the terminal's default colours to the theme's
 
 	Header, HeaderDim paint // top bar
 	CurRoom, Prompt   paint
@@ -63,7 +64,42 @@ type Theme struct {
 
 func newTheme(name string, fg, bg int) *Theme {
 	return &Theme{Name: name, fg: fg, bg: bg,
-		Base: "\x1b[0;38;5;" + strconv.Itoa(fg) + ";48;5;" + strconv.Itoa(bg) + "m"}
+		Base: "\x1b[0;38;5;" + strconv.Itoa(fg) + ";48;5;" + strconv.Itoa(bg) + "m",
+		// OSC 10/11 also set the terminal's own default colours, so cells we
+		// never paint — the window padding, columns beyond the size the
+		// client reported, rows ConPTY re-renders without our background on
+		// Windows — show the theme too. Terminals without it ignore it.
+		Defaults: "\x1b]10;" + hex256(fg) + "\x07\x1b]11;" + hex256(bg) + "\x07"}
+}
+
+// resetDefaults restores the terminal's own default colours (OSC 110/111).
+const resetDefaults = "\x1b]110\x07\x1b]111\x07"
+
+// xterm256 returns the standard RGB value of a 256-colour index (16–255;
+// 0–15 are user-configurable and deliberately unused by the themes).
+func xterm256(n int) (r, g, b int) {
+	switch {
+	case n >= 232:
+		v := 8 + (n-232)*10
+		return v, v, v
+	case n >= 16:
+		n -= 16
+		lv := func(i int) int {
+			if i == 0 {
+				return 0
+			}
+			return 55 + i*40
+		}
+		return lv(n / 36), lv(n / 6 % 6), lv(n % 6)
+	}
+	panic("system colour used in a theme")
+}
+
+// hex256 formats a 256-colour index as #rrggbb.
+func hex256(n int) string {
+	const d = "0123456789abcdef"
+	r, g, b := xterm256(n)
+	return string([]byte{'#', d[r>>4], d[r&15], d[g>>4], d[g&15], d[b>>4], d[b&15]})
 }
 
 // p builds a style: foreground fg, background bg (-1 = theme's), plus SGR

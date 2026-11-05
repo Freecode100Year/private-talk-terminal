@@ -126,7 +126,7 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 	t.fullRedraw()
 	t.flush()
 	defer func() {
-		t.out.WriteString("\x1b[0m\x1b[r\x1b[?2004l\x1b[?1049l")
+		t.out.WriteString("\x1b[0m\x1b[r\x1b[?2004l\x1b[?1049l" + resetDefaults)
 		t.flush()
 	}()
 
@@ -362,6 +362,7 @@ func (t *Term) fullRedraw() {
 	// Base before erasing: the terminal fills cleared cells with the current
 	// background, which paints the whole screen in the theme's colour.
 	t.out.WriteString("\x1b[r")
+	t.out.WriteString(t.th.Defaults)
 	t.out.WriteString(t.th.Base)
 	t.out.WriteString("\x1b[H\x1b[2J")
 	if t.tooSmall() {
