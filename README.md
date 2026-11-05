@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml/badge.svg)](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml)
 
-一条 SSH 命令进入聊天室，也可以直接用浏览器打开。不用注册、不用密码、不用装 App。
+一条 SSH 命令进入聊天室。不用注册、不用密码、不用装 App。
 
 ```
 ssh -p 2222 guest@term.freedom8964.com
@@ -28,8 +28,6 @@ Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 
 
 **电脑**（Windows / macOS / Linux 自带 ssh）：运行上面那条命令。第一次连接会问是否信任服务器，输入 `yes`。
 
-**浏览器**（部署者开了网页入口时）：直接打开聊天室网址，和 SSH 用户在同一个房间。右上角 `A−` / `A+` 调字号，`◐` 换背景，浏览器只记住这两个设置。
-
 **iPhone / iPad**：
 
 - **iSH Shell**：App Store 免费下载，先运行 `apk add openssh-client`，再运行上面的命令。
@@ -47,7 +45,6 @@ Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 
 /msg <昵称> <内容>   私聊
 /nick <名字>         改昵称
 /who                 谁在这里
-/font + 或 /font -   调大、调小字号（网页版；SSH 里会告诉你怎么缩放终端）
 /help all            全部命令
 ```
 
@@ -67,7 +64,7 @@ Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 
 curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install.sh | sudo bash
 ```
 
-想让大家用浏览器也能进，加 `--web 8080`，见[网页入口](docs/deploy.md#网页入口)。装好后用 `sudo vivant-ctl status | upgrade | uninstall` 管理；连不上时运行 `sudo vivant-ctl doctor`，它会逐项检查并告诉你怎么修。别忘了在云厂商的防火墙里放行 TCP 2222；域名在 Cloudflare 上要设为 DNS only（灰云）。也可以用 Docker 部署，见[部署与配置](docs/deploy.md#docker可选)。
+装好后用 `sudo vivant-ctl status | upgrade | uninstall` 管理；连不上时运行 `sudo vivant-ctl doctor`，它会逐项检查并告诉你怎么修。别忘了在云厂商的防火墙里放行 TCP 2222；域名在 Cloudflare 上要设为 DNS only（灰云）。也可以用 Docker 部署，见[部署与配置](docs/deploy.md#docker可选)。
 
 **服务器连不上 GitHub：** 下载发布页里的离线一键安装包，在自己电脑上运行 `bash vivant-<版本>-linux-offline.sh --to root@服务器` 即可部署，见[离线安装](docs/deploy.md#离线安装服务器连不上-github)。想在 Windows / macOS 上临时跑一个（测试、局域网），发布页也有对应的程序，见[部署与配置](docs/deploy.md#windows--macos)。
 
@@ -92,8 +89,6 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 - [x] **外部监控、口令设计原则**：写进文档（借鉴 devzat、ssh-chat、sshoosh）
 - [x] **安全审计后的加固**：只用现代 SSH 算法、剔除隐形字符和标签字符（附模糊测试）、TCP 总连接上限、没有生效封禁时自动换封禁密钥
 - [x] **改名 VIVANT**：旧服务器运行一键安装命令自动迁移
-- [x] **调整字号**：`/font +`、`/font -`、`/font 20`、`/font reset`；网页版右上角 `A−` / `A+`，从 12 到 40 像素；SSH 里输入 `/font` 会说明各个终端怎么缩放（字号由终端决定）
-- [x] **网页入口**：浏览器打开就能聊，和 SSH 用户同一个聊天室、同一套命令和配色；不用装插件，页面不加载任何外部资源；部署时加 `--web 8080`（WebSocket 代码取自 [HTML Room](https://github.com/Freecode100Year/htmlroom)，代理与同源检查沿用 [隐匿对话](https://github.com/Freecode100Year/private-talk)）
 - [x] **离线一键安装**：一个自解压文件，`--to root@服务器` 从自己电脑直接部署；另附 Windows / macOS 程序供测试和局域网使用
 
 ## 文档

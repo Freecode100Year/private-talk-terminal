@@ -99,42 +99,6 @@ VIVANT used to be called Private-Talk Terminal (binary `ptterm`). On a server ru
 
 Servers that haven't migrated can still run `sudo ptterm-ctl upgrade` to get the new program (under the old names) and run the install command to migrate whenever convenient. The binary also still accepts the old `PTT_*` environment variables.
 
-## Web entry
-
-Lets people without SSH join the same chat from a browser. The program serves the page itself (one page, no external resources) and a WebSocket: no Node, no database. Browsers want HTTPS, so put Cloudflare or Caddy in front. Pick one:
-
-**A. Cloudflare orange cloud (easiest)**
-
-```bash
-sudo vivant-ctl install --web 8080          # --web-proxy cloudflare is the default
-```
-
-1. In Cloudflare, add a **subdomain** such as `web.example.com` pointing at the server, **proxied (orange cloud)**. Keep the SSH name grey (SSH can't go through Cloudflare's proxy).
-2. The server speaks plain HTTP on 8080, so that subdomain needs SSL mode "Flexible": SSL/TLS → Configuration Rules → hostname equals `web.example.com` → SSL: Flexible. This changes only that subdomain, not other sites on the zone.
-3. Open `https://web.example.com`. Allow TCP 8080 in the cloud firewall too (Cloudflare proxies to 8080).
-
-`CF-Connecting-IP` is only believed from Cloudflare's published ranges, so connecting to 8080 directly can't fake an address. The trade-off: Cloudflare terminates TLS and can see users' IPs and the messages (`/privacy` tells users so).
-
-**B. Caddy on the same host (automatic HTTPS, Cloudflare sees nothing)**
-
-```bash
-sudo vivant-ctl install --web 2280 --web-proxy local   # listens on 127.0.0.1:2280 only
-```
-
-`/etc/caddy/Caddyfile`:
-
-```
-web.example.com {
-	reverse_proxy 127.0.0.1:2280
-}
-```
-
-Grey cloud, open 80/443, `systemctl reload caddy`. Only the last `X-Forwarded-For` entry, written by the local proxy, is believed.
-
-**C. cloudflared tunnel (no open port)**: set `VIVANT_WEB_ADDR=127.0.0.1:2280` and `VIVANT_WEB_PROXY=cloudflare` in `/etc/vivant.env`, then `cloudflared tunnel --url http://127.0.0.1:2280` (or a named tunnel).
-
-Turn it off: `sudo vivant-ctl install --web off`. Web users share the SSH users' limits (3 sessions per address, …), bans and idle timeout. The page shows the SSH command (built from `--domain` and the port, or set `VIVANT_WEB_SSH`).
-
 ## Can't connect? Run the self-check
 
 ```bash
@@ -195,9 +159,6 @@ Config file `/etc/vivant.env`; after editing run `systemctl restart vivant`:
 | `VIVANT_ONION_ADDR` / `-onion-addr` | — | local listener for the Tor onion service (`--tor` sets `127.0.0.1:2224`) |
 | `VIVANT_BAN_FILE` / `-ban-file` | — | ban persistence file (`--persist-bans` sets `/var/lib/vivant/bans.json`) |
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | extra listen addresses, comma separated (`--alt-port 443` sets `:443`) |
-| `VIVANT_WEB_ADDR` / `-web-addr` | — | web entry listen address (`--web 8080` sets `:8080`), see [Web entry](#web-entry) |
-| `VIVANT_WEB_PROXY` / `-web-proxy` | `none` (installer default `cloudflare`) | proxy in front of the web entry: `cloudflare`, `local` or `none`; decides where the client address comes from |
-| `VIVANT_WEB_SSH` / `-web-ssh` | automatic | SSH command shown on the web page |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | download Tor's exit list so Tor users share the generous limits; `off` disables |
 | `-quiet-above` | 20 | above this many people, join/leave lines become a summary every 30 s (-1 = never) |
 | `-history` / `-history-ttl` | 50 / 1h | messages kept per room, and for how long |

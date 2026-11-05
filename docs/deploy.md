@@ -99,42 +99,6 @@ VIVANT 以前叫 Private-Talk Terminal（程序名 `ptterm`）。已经部署了
 
 还没迁移的服务器执行 `sudo ptterm-ctl upgrade` 也能升级到新版本程序（继续沿用旧名字），之后随时再运行一键安装命令完成迁移。
 
-## 网页入口
-
-让没有 SSH 的人用浏览器进同一个聊天室。程序自己提供网页（一个页面，不加载任何外部资源）和 WebSocket，不需要另装 Node 或数据库。浏览器需要 HTTPS 才放心，所以前面通常放 Cloudflare 或 Caddy。三选一：
-
-**A. Cloudflare 橙色云（最省事）**
-
-```bash
-sudo vivant-ctl install --web 8080          # 默认 --web-proxy cloudflare
-```
-
-1. 在 Cloudflare 新建一个**子域名**，例如 `web.example.com`，指向服务器 IP，**开橙色云**。SSH 用的域名保持灰云不变（SSH 过不了 Cloudflare 代理）。
-2. 服务器在 8080 上只说 HTTP，所以这个子域名的 SSL 要用“灵活 Flexible”：SSL/TLS → 配置规则（Configuration Rules）→ 主机名等于 `web.example.com` → SSL 设为 Flexible。只改这一个子域名，不影响同一个域名下的其他网站。
-3. 打开 `https://web.example.com` 就能聊。云厂商防火墙也要放行 TCP 8080（Cloudflare 支持转发到 8080）。
-
-程序只相信来自 Cloudflare 官方 IP 段的 `CF-Connecting-IP`，有人绕过 Cloudflare 直连 8080 也伪造不了地址。代价：Cloudflare 在中间解开 TLS，能看到用户 IP 和聊天内容（`/privacy` 会如实告诉用户）。
-
-**B. 本机 Caddy（自动 HTTPS，Cloudflare 看不到内容）**
-
-```bash
-sudo vivant-ctl install --web 2280 --web-proxy local   # 只监听 127.0.0.1:2280
-```
-
-`/etc/caddy/Caddyfile`：
-
-```
-web.example.com {
-	reverse_proxy 127.0.0.1:2280
-}
-```
-
-域名设灰云，放行 80/443，`systemctl reload caddy`。程序只相信本机代理写的最后一个 `X-Forwarded-For`。
-
-**C. cloudflared 隧道（不开端口）**：在 `/etc/vivant.env` 里写 `VIVANT_WEB_ADDR=127.0.0.1:2280` 和 `VIVANT_WEB_PROXY=cloudflare`，然后 `cloudflared tunnel --url http://127.0.0.1:2280`（或配置固定隧道）。
-
-关掉：`sudo vivant-ctl install --web off`。网页用户和 SSH 用户共用同样的限额（每个地址 3 个会话等）、封禁和空闲断开；网页上会显示 SSH 连接命令（由 `--domain` 和端口自动生成，也可以改 `VIVANT_WEB_SSH`）。
-
 ## 连不上？先跑自检
 
 ```bash
@@ -195,9 +159,6 @@ sudo vivant-ctl status        # 输出里的 Host key: SHA256:…
 | `VIVANT_ONION_ADDR` / `-onion-addr` | — | 给 Tor 洋葱服务用的本地监听地址（`--tor` 自动设为 `127.0.0.1:2224`） |
 | `VIVANT_BAN_FILE` / `-ban-file` | — | 封禁持久化文件（`--persist-bans` 设为 `/var/lib/vivant/bans.json`） |
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | 额外监听地址，逗号分隔（`--alt-port 443` 设为 `:443`） |
-| `VIVANT_WEB_ADDR` / `-web-addr` | — | 网页入口监听地址（`--web 8080` 设为 `:8080`），见[网页入口](#网页入口) |
-| `VIVANT_WEB_PROXY` / `-web-proxy` | `none`（安装脚本默认 `cloudflare`） | 网页入口前面的代理：`cloudflare`、`local`、`none`，决定从哪里取用户地址 |
-| `VIVANT_WEB_SSH` / `-web-ssh` | 自动 | 网页上显示的 SSH 连接命令 |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | 定期下载 Tor 出口节点列表，让 Tor 用户共用宽松限额；`off` 关闭 |
 | `-quiet-above` | 20 | 房间超过这个人数后，进出提示改为每 30 秒汇总一次（-1 = 不汇总） |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |

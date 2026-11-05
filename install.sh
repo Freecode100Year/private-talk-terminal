@@ -34,8 +34,6 @@ FROM_SOURCE=0
 FIREWALL=1
 TOR=0
 ALT_PORT=""
-WEB=""
-WEB_PROXY=""
 PERSIST_BANS=""
 PURGE=0
 ROOMS=""
@@ -87,10 +85,6 @@ ${C_B}VIVANT 安装器 · installer${C_0}
   --version vX.Y.Z   安装指定版本（默认最新）· install a specific release (default: latest)
   --alt-port N       同时监听端口 N（如 443，给防火墙严格的网络）；--alt-port off 关闭
                      also listen on port N (e.g. 443, for strict firewalls); --alt-port off removes it
-  --web N            打开网页入口，监听端口 N（如 8080，浏览器打开 http://域名:N 就能聊）；--web off 关闭
-                     open the web entry on port N (e.g. 8080: chat in a browser at http://host:N); --web off removes it
-  --web-proxy MODE   网页入口前面的代理 proxy in front of it: cloudflare（默认 default，橙色云 / cloudflared）、
-                     local（本机 Caddy/nginx，网页只监听 127.0.0.1 · this host's Caddy/nginx, listens on 127.0.0.1 only）、none
   --tor              同时发布为 Tor 洋葱服务，服务器看不到用户 IP
                      also publish the chat as a Tor onion service, so the server never sees users' IPs
   --persist-bans     重启后保留封禁（会把哈希密钥存盘，见文档）· keep bans across restarts (stores a hash key on disk)
@@ -142,10 +136,6 @@ parse_args() {
 		--tor) TOR=1; shift ;;
 		--alt-port) ALT_PORT=${2:?--alt-port needs a value}; shift 2 ;;
 		--alt-port=*) ALT_PORT=${1#*=}; shift ;;
-		--web) WEB=${2:?--web needs a value}; shift 2 ;;
-		--web=*) WEB=${1#*=}; shift ;;
-		--web-proxy) WEB_PROXY=${2:?--web-proxy needs a value}; shift 2 ;;
-		--web-proxy=*) WEB_PROXY=${1#*=}; shift ;;
 		--persist-bans) PERSIST_BANS=on; shift ;;
 		--no-persist-bans) PERSIST_BANS=off; shift ;;
 		--no-firewall) FIREWALL=0; shift ;;
@@ -161,13 +151,6 @@ parse_args() {
 	if [ -n "$ALT_PORT" ] && [ "$ALT_PORT" != off ]; then
 		[[ "$ALT_PORT" =~ ^[0-9]+$ ]] && [ "$ALT_PORT" -ge 1 ] && [ "$ALT_PORT" -le 65535 ] || die "--alt-port 无效 invalid: $ALT_PORT"
 	fi
-	if [ -n "$WEB" ] && [ "$WEB" != off ]; then
-		[[ "$WEB" =~ ^[0-9]+$ ]] && [ "$WEB" -ge 1 ] && [ "$WEB" -le 65535 ] || die "--web 无效 invalid: $WEB（填端口号，如 8080 · give a port, e.g. 8080）"
-	fi
-	case "$WEB_PROXY" in
-	"" | cloudflare | local | none) ;;
-	*) die "--web-proxy 只能是 must be cloudflare | local | none" ;;
-	esac
 }
 
 # ---------------------------------------------------------------- checks ----
@@ -225,12 +208,6 @@ port_owner() { # prints the process listening on TCP port $1 ("unknown" if it ca
 current_alt_port() {
 	if [ -f "$ENV_FILE" ]; then
 		sed -n 's/^VIVANT_ALT_ADDR=.*:\([0-9]\{1,5\}\)$/\1/p' "$ENV_FILE" | tail -1
-	fi
-}
-
-current_web_port() {
-	if [ -f "$ENV_FILE" ]; then
-		sed -n 's/^VIVANT_WEB_ADDR=.*:\([0-9]\{1,5\}\)$/\1/p' "$ENV_FILE" | tail -1
 	fi
 }
 
@@ -452,7 +429,6 @@ EOF
 	off) sed -i '/^VIVANT_ALT_ADDR=/d' "$ENV_FILE" ;;
 	*) set_env VIVANT_ALT_ADDR ":$ALT_PORT" ;;
 	esac
-	write_web_env
 	case "$PERSIST_BANS" in
 	on) set_env VIVANT_BAN_FILE "$STATE_DIR/bans.json" ;;
 	off)
@@ -462,34 +438,6 @@ EOF
 	esac
 	PORT=$(current_port)
 	PORT=${PORT:-2222}
-}
-
-# The web entry: VIVANT_WEB_ADDR / _PROXY / _SSH in the env file.
-write_web_env() {
-	local proxy port
-	if [ "$WEB" = off ]; then
-		sed -i '/^VIVANT_WEB_ADDR=/d; /^VIVANT_WEB_PROXY=/d; /^VIVANT_WEB_SSH=/d' "$ENV_FILE"
-		return
-	fi
-	port=${WEB:-$(current_web_port)}
-	[ -n "$port" ] || return 0
-	proxy=${WEB_PROXY:-$(sed -n 's/^VIVANT_WEB_PROXY=//p' "$ENV_FILE" | tail -1)}
-	proxy=${proxy:-cloudflare}
-	if [ "$proxy" = local ]; then
-		set_env VIVANT_WEB_ADDR "127.0.0.1:$port"
-	else
-		set_env VIVANT_WEB_ADDR ":$port"
-	fi
-	set_env VIVANT_WEB_PROXY "$proxy"
-	local host=${DOMAIN:-$(sed -n 's/^VIVANT_DOMAIN=//p' "$ENV_FILE" | tail -1)} p=${PORT:-$(current_port)}
-	p=${p:-2222}
-	if [ -n "$host" ]; then
-		if [ "$p" = 22 ]; then set_env VIVANT_WEB_SSH "ssh guest@$host"; else set_env VIVANT_WEB_SSH "ssh -p $p guest@$host"; fi
-	fi
-}
-
-web_is_public() { # is the web entry listening on all addresses (needs a firewall opening)?
-	grep -q '^VIVANT_WEB_ADDR=:' "$ENV_FILE" 2>/dev/null
 }
 
 add_admin_keys() {
@@ -524,9 +472,7 @@ write_unit() {
 	rm -f "$DROPIN_DIR/low-port.conf"
 	local alt
 	alt=$(current_alt_port)
-	local web
-	web=$(current_web_port)
-	if [ "$PORT" -lt 1024 ] || { [ -n "$alt" ] && [ "$alt" -lt 1024 ]; } || { [ -n "$web" ] && [ "$web" -lt 1024 ]; }; then
+	if [ "$PORT" -lt 1024 ] || { [ -n "$alt" ] && [ "$alt" -lt 1024 ]; }; then
 		mkdir -p "$DROPIN_DIR"
 		cat >"$DROPIN_DIR/low-port.conf" <<'EOF'
 # Added by install.sh: allow binding a privileged port (< 1024).
@@ -701,15 +647,6 @@ EOF
 		echo "  通过 Tor Via Tor:      ${C_B}torsocks ssh guest@$onion${C_0}"
 		echo "                         (或 or: ssh -o ProxyCommand='nc -x 127.0.0.1:9050 %h %p' guest@$onion)"
 	fi
-	local web
-	web=$(current_web_port)
-	if [ -n "$web" ]; then
-		if web_is_public; then
-			echo "  网页 Web:              ${C_B}http://$host:$web${C_0}  （HTTPS：域名开 Cloudflare 橙色云，见文档 · see docs/deploy.md）"
-		else
-			echo "  网页 Web:              http://127.0.0.1:$web  （本机，请用 Caddy/nginx 反代 · local only: put Caddy/nginx in front）"
-		fi
-	fi
 	[ -n "$fp" ] && echo "  主机密钥 Host key:     $fp  （用户首次连接时会看到 users see this on first connect）"
 	cat <<EOF
   配置 Config:           $ENV_FILE  （改完执行 then: systemctl restart vivant）
@@ -817,24 +754,15 @@ do_install() {
 		fi
 	fi
 
-	if [ -n "$WEB" ] && [ "$WEB" != off ]; then
-		{ [ "$WEB" = "$want" ] || [ "$WEB" = "$ALT_PORT" ]; } && die "--web 不能和 SSH 端口相同 · must differ from the SSH ports"
-		owner=$(port_owner "$WEB")
-		if [ -n "$owner" ] && [ "$owner" != vivant ]; then
-			die "端口 $WEB 已被 '$owner' 占用，换一个 --web N · port $WEB is already in use by '$owner'. Pick another --web N."
-		fi
-	fi
-
 	get_binary
 	install -m 0755 "$TMP/vivant" "$BIN.new"
 	mv -f "$BIN.new" "$BIN"
 	ok "已安装 Installed $BIN ($("$BIN" -version))"
 
 	mkdir -p "$CONF_DIR"
-	local old_port old_alt old_web
+	local old_port old_alt
 	old_port=$(current_port || true)
 	old_alt=$(current_alt_port || true)
-	old_web=$(web_is_public && current_web_port || true)
 	write_env
 	add_admin_keys
 	write_unit
@@ -849,12 +777,6 @@ do_install() {
 	[ -n "$alt" ] && open_firewall "$alt"
 	if [ -n "$old_alt" ] && [ "$old_alt" != "$alt" ]; then
 		close_firewall "$old_alt"
-	fi
-	local web=""
-	web_is_public && web=$(current_web_port)
-	[ -n "$web" ] && open_firewall "$web"
-	if [ -n "$old_web" ] && [ "$old_web" != "$web" ]; then
-		close_firewall "$old_web"
 	fi
 
 	systemctl enable vivant >/dev/null 2>&1
@@ -893,7 +815,6 @@ do_uninstall() {
 	local alt
 	alt=$(current_alt_port || true)
 	[ -n "$alt" ] && close_firewall "$alt"
-	if web_is_public; then close_firewall "$(current_web_port)"; fi
 	remove_tor
 	[ "$(readlink -f "${BASH_SOURCE[0]:-}")" = "$CTL" ] || rm -f "$CTL"
 	[ $PURGE = 1 ] && rm -f "$CTL"
@@ -917,7 +838,6 @@ do_status() {
 	local onion
 	onion=$(onion_name)
 	if [ -n "$onion" ]; then echo "洋葱 Onion:     $onion (Tor)"; fi
-	if [ -n "$(current_web_port)" ]; then echo "网页 Web:       $(env_get VIVANT_WEB_ADDR)（代理 proxy: $(env_get VIVANT_WEB_PROXY)）"; fi
 	if command -v ssh-keygen >/dev/null && [ -f "$STATE_DIR/host_ed25519" ]; then
 		echo "主机密钥 Host key: $(ssh-keygen -lf "$STATE_DIR/host_ed25519" 2>/dev/null | awk '{print $2}')（公布出来供用户核对 · publish it so users can verify）"
 	fi
@@ -981,7 +901,7 @@ firewall_allows() { # firewall_allows PORT — 0 allowed, 1 blocked, 2 unknown/n
 }
 
 do_doctor() {
-	local port alt web onion_addr domain health v latest p r
+	local port alt onion_addr domain health v latest p r
 	echo "${C_B}VIVANT 自检 doctor${C_0}"
 
 	d_head "服务 Service"
@@ -1022,9 +942,7 @@ do_doctor() {
 	port=$(current_port)
 	port=${port:-2222}
 	alt=$(current_alt_port)
-	web=""
-	web_is_public && web=$(current_web_port)
-	for p in $port $alt $web; do
+	for p in $port $alt; do
 		if port_open "$p"; then
 			r=$(port_owner "$p")
 			if [ "$r" = vivant ] || [ "$r" = unknown ]; then

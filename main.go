@@ -48,9 +48,6 @@ func main() {
 		maxLen      = flag.Int("max-len", 500, "单条消息最大字数 · maximum message length in characters")
 		idle        = flag.Duration("idle-timeout", time.Hour, "多久不发言就断开（0 = 不断开）· disconnect sessions silent for this long (0 = never)")
 		motd        = flag.String("motd", envOr("MOTD", ""), "进入时额外显示的公告文本文件（可选）· file with extra welcome lines shown on connect (optional)")
-		webAddr     = flag.String("web-addr", envOr("WEB_ADDR", ""), "网页入口监听地址，例如 127.0.0.1:2280 或 :8080（留空 = 不开网页入口）· web page listen address, e.g. 127.0.0.1:2280 or :8080 (empty = no web entry)")
-		webProxy    = flag.String("web-proxy", envOr("WEB_PROXY", "none"), "网页入口前面的代理：none、local（本机 Caddy/nginx）、cloudflare（橙色云或 cloudflared）· proxy in front of the web entry: none, local (Caddy/nginx on this host), cloudflare (orange cloud or cloudflared)")
-		webSSH      = flag.String("web-ssh", envOr("WEB_SSH", ""), "网页上显示的 SSH 连接命令（可选）· SSH command shown on the web page (optional)")
 		healthAddr  = flag.String("health-addr", envOr("HEALTH_ADDR", ""), "在此地址提供 GET /healthz（只返回计数），例如 127.0.0.1:2223 · serve GET /healthz (counts only) here, e.g. 127.0.0.1:2223")
 		verbose     = flag.Bool("v", false, "调试日志 · debug logging")
 		showVersion = flag.Bool("version", false, "显示版本号后退出 · print version and exit")
@@ -107,7 +104,6 @@ func main() {
 		TorEnabled:    *onionAddr != "",
 		TorExits:      *torExits,
 		QuietAbove:    *quietAbove,
-		WebProxy:      webProxyFact(*webAddr, *webProxy),
 	})
 
 	srv, err := server.New(hub, server.Options{
@@ -124,10 +120,6 @@ func main() {
 		BanFile:       *banFile,
 		AltAddrs:      splitList(*altAddr),
 		TorExits:      *torExits,
-		WebAddr:       *webAddr,
-		WebProxy:      *webProxy,
-		WebSSH:        *webSSH,
-		Version:       version,
 	}, log)
 	if err != nil {
 		log.Error("could not create server", "err", err)
@@ -157,8 +149,7 @@ func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	clean := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		if redactKeys[strings.ToLower(a.Key)] && !strings.HasPrefix(r.Message, "VIVANT listening") &&
-			r.Message != "health endpoint" && r.Message != "onion listener" && r.Message != "alternate listener" &&
-			r.Message != "web listener" {
+			r.Message != "health endpoint" && r.Message != "onion listener" && r.Message != "alternate listener" {
 			a = slog.String(a.Key, "[redacted]")
 		}
 		clean.AddAttrs(a)
@@ -204,17 +195,6 @@ func serveHealth(ctx context.Context, addr string, hub *chat.Hub, log *slog.Logg
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error("health endpoint failed", "err", err)
 	}
-}
-
-// webProxyFact is what /privacy reports about the web entry ("" = off).
-func webProxyFact(addr, proxy string) string {
-	if addr == "" {
-		return ""
-	}
-	if m, err := server.ParseProxyMode(proxy); err == nil {
-		return m
-	}
-	return proxy
 }
 
 func splitList(s string) []string {

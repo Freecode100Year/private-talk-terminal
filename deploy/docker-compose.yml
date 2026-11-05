@@ -15,9 +15,6 @@ services:
       VIVANT_ADDR: ":2222"
       GOMEMLIMIT: "600MiB"
       # VIVANT_ROOMS: "general:大厅,english:English"
-      # 网页入口 web entry: http://<host>:8080
-      # VIVANT_WEB_ADDR: ":8080"
-      # VIVANT_WEB_PROXY: "cloudflare"
     command: ["-history", "50", "-history-ttl", "1h", "-max-per-ip", "3", "-idle-timeout", "1h"]
     volumes:
       - vivant-data:/data

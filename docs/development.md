@@ -20,8 +20,6 @@ internal/ui/term.go         完整界面：轻量终端渲染器 + 按键解码
 internal/ui/plain.go        纯文本行模式
 internal/ui/format.go       消息格式、时区、@提及
 internal/server/            Wish SSH 网关、认证、连接限制、封禁持久化
-internal/server/web.go      网页入口：HTTP、JSON 协议、代理地址；web/ 是内嵌的页面
-internal/server/ws.go       WebSocket（取自 HTML Room 的 Go 中继，零依赖）
 cmd/vivant-bench/           压测工具
 deploy/                     systemd 单元（由 install.sh --print-unit 生成）、配置示例、离线一键安装包的打包脚本
 ```
@@ -43,5 +41,4 @@ deploy/                     systemd 单元（由 install.sh --print-unit 生成�
 - [x] `vivant-ctl doctor` 自检
 - [x] 连接层读取限速、Docker 镜像（GHCR）
 - [x] 握手超时（30 秒），知名端口提醒，外部监控文档
-- [x] `/font` 调字号；网页入口（`--web`），复用 HTML Room 的 WebSocket 和隐匿对话的代理/同源检查
 - 不计划：在 SSH 聊天室本身里做端到端加密。这需要在用户设备上安装专用客户端，与“一条 ssh 命令就能进”的定位冲突。
