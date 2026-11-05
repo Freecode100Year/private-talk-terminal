@@ -65,11 +65,11 @@ sudo vivant-ctl uninstall --purge # 彻底删除
 
 ```bash
 # 方式一：在自己电脑上一条命令部署到服务器（Linux、macOS，或 Windows 的 Git Bash / WSL）
-bash vivant-v0.9.3-linux-offline.sh --to root@服务器
+bash vivant-v0.9.4-linux-offline.sh --to root@服务器
 
 # 方式二：先把文件传到服务器，再在服务器上运行
-scp vivant-v0.9.3-linux-offline.sh root@服务器:
-sudo bash vivant-v0.9.3-linux-offline.sh
+scp vivant-v0.9.4-linux-offline.sh root@服务器:
+sudo bash vivant-v0.9.4-linux-offline.sh
 ```
 
 后面可以跟和在线安装一样的参数，例如 `--to root@服务器 --port 2222 --admin-key ~/.ssh/id_ed25519.pub`（方式一里公钥文件路径指的是服务器上的路径，离线时请先把公钥传上去，或用方式二）。`--to` 用的是你电脑上的 ssh/scp，服务器上的用户不是 root 时会自动用 sudo。
