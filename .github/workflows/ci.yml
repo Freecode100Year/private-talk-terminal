@@ -177,12 +177,9 @@ jobs:
           grep -q '^VIVANT_WEB_PROXY=cloudflare' /etc/vivant.env
           grep -q '^VIVANT_WEB_SSH=ssh -p 2222 guest@localhost' /etc/vivant.env
           for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
-          curl -fsS -o /tmp/page.html http://127.0.0.1:8080/
-          grep -q VIVANT /tmp/page.html
-          curl -fsS -D /tmp/headers.txt -o /dev/null http://127.0.0.1:8080/app.js
-          grep -qi "content-security-policy" /tmp/headers.txt
-          sudo vivant-ctl status > /tmp/status.txt
-          grep -q "Web:" /tmp/status.txt
+          curl -fsS http://127.0.0.1:8080/ | grep -q VIVANT
+          curl -fsSI http://127.0.0.1:8080/app.js | grep -qi "content-security-policy"
+          sudo vivant-ctl status | grep -q "Web:"
           sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --web 8080 --web-proxy local
           ss -ltn > /tmp/ss.txt
           grep -q '127.0.0.1:8080 ' /tmp/ss.txt
