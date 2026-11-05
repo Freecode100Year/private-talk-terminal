@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>VIVANT · 匿名聊天室</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="brand">VIVANT</span>
+  <span id="status" class="status off">未连接 · offline</span>
+  <button id="reconnect" type="button" hidden>重新连接 · Reconnect</button>
+</header>
+<main id="log" aria-live="polite" tabindex="0"></main>
+<form id="form" autocomplete="off">
+  <span class="prompt">&gt;</span>
+  <input id="input" type="text" enterkeyhint="send" spellcheck="false" autocapitalize="off"
+         placeholder="输入消息，/help 查看命令 · type a message, /help for commands" maxlength="2000">
+  <button type="submit">发送 Send</button>
+</form>
+<footer>
+  匿名、不存 IP、不用 Cookie · anonymous, no IP logs, no cookies ·
+  终端用户 terminal users: <code id="sshcmd">ssh -p 2222 guest@term.freedom8964.com</code>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

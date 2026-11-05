@@ -290,6 +290,19 @@ func (s *Server) keyFor(local, remote net.Addr) string {
 	return s.addrKey(remote)
 }
 
+// ClientKey is the rate-limit key for a client at ip that did not come in
+// over SSH (the web gateway): Tor exits share the Tor bucket, everyone else
+// gets the same keyed hash an SSH connection from that address would.
+func (s *Server) ClientKey(ip net.IP) string {
+	if ip == nil {
+		return s.addrKey(&net.TCPAddr{})
+	}
+	if s.isTorExit(ip.String()) {
+		return OnionKey
+	}
+	return s.addrKey(&net.TCPAddr{IP: ip})
+}
+
 func (s *Server) addrKey(addr net.Addr) string {
 	host := addr.String()
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -324,11 +337,7 @@ func (s *Server) sessionMiddleware(next ssh.Handler) ssh.Handler {
 		admin := s.isAdminUser(sess.User()) && s.isAdmin(sess.PublicKey())
 		c, err := s.hub.Connect(s.keyFor(sess.LocalAddr(), sess.RemoteAddr()), admin)
 		if err != nil {
-			msg := "抱歉 Sorry: " + err.Error()
-			if zh, ok := refusalZh[err]; ok {
-				msg = "抱歉：" + zh + " · Sorry: " + err.Error()
-			}
-			wish.Fatalln(sess, msg)
+			wish.Fatalln(sess, chat.RefusalText(err))
 			return
 		}
 		if admin {
@@ -562,11 +571,4 @@ func loadAuthorizedKeys(path string) ([][]byte, error) {
 		keys = append(keys, k.Marshal())
 	}
 	return keys, sc.Err()
-}
-
-var refusalZh = map[error]string{
-	chat.ErrBanned:       "这个地址暂时被封禁了",
-	chat.ErrFull:         "服务器已满，请稍后再试",
-	chat.ErrTooManyConns: "你的地址连接数太多了",
-	chat.ErrConnRate:     "连接太频繁，请等一分钟",
 }

@@ -267,7 +267,8 @@ jobs:
         run: |
           set -x
           docker run -d --name vivant --network host --read-only --cap-drop ALL \
-            --security-opt no-new-privileges -v vivant-data:/data -e VIVANT_ADDR=:2290 vivant:ci
+            --security-opt no-new-privileges -v vivant-data:/data -e VIVANT_ADDR=:2290 \
+            -e VIVANT_WEB_ADDR=127.0.0.1:8090 vivant:ci
           for _ in $(seq 1 30); do ss -ltn | grep -q ':2290 ' && break; sleep 0.5; done
           out=$( (sleep 1; echo "/nick dock"; sleep 0.5; echo "hi from docker"; sleep 0.5; echo /quit) \
             | ssh -T -p 2290 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null en@127.0.0.1 )
@@ -275,6 +276,11 @@ jobs:
           echo "$out" | grep -q "Welcome"
           echo "$out" | grep -q "<dock> hi from docker"
           test "$(docker exec vivant /usr/local/bin/vivant -version)" = "vivant ci"
+          # web entrance: the page is served and /ws upgrades to a WebSocket
+          curl -fsS http://127.0.0.1:8090/ | grep -q VIVANT
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://127.0.0.1:8090/ws || true)
+          test "$code" = 101
           # the host key lands in the volume and survives a restart
           fp1=$(ssh-keyscan -p 2290 127.0.0.1 2>/dev/null | ssh-keygen -lf - | awk '{print $2}')
           docker restart vivant

@@ -34,6 +34,8 @@ FROM_SOURCE=0
 FIREWALL=1
 TOR=0
 ALT_PORT=""
+WEB_PORT=""
+WEB_PROXY=""
 PERSIST_BANS=""
 PURGE=0
 ROOMS=""
@@ -85,6 +87,10 @@ ${C_B}VIVANT 安装器 · installer${C_0}
   --version vX.Y.Z   安装指定版本（默认最新）· install a specific release (default: latest)
   --alt-port N       同时监听端口 N（如 443，给防火墙严格的网络）；--alt-port off 关闭
                      also listen on port N (e.g. 443, for strict firewalls); --alt-port off removes it
+  --web-port N       开网页入口（浏览器 + WebSocket），只监听 127.0.0.1:N，用 Cloudflare Tunnel 或 HTTPS 反代接出去；off 关闭
+                     open the browser/WebSocket entrance on 127.0.0.1:N, published via Cloudflare Tunnel or an HTTPS proxy; off removes it
+  --web-proxy KIND   网页入口前面是什么：cloudflare（默认，读 CF-Connecting-IP）或 proxy（Caddy/nginx，读 X-Forwarded-For）
+                     what sits in front of it: cloudflare (default, CF-Connecting-IP) or proxy (Caddy/nginx, X-Forwarded-For)
   --tor              同时发布为 Tor 洋葱服务，服务器看不到用户 IP
                      also publish the chat as a Tor onion service, so the server never sees users' IPs
   --persist-bans     重启后保留封禁（会把哈希密钥存盘，见文档）· keep bans across restarts (stores a hash key on disk)
@@ -136,6 +142,10 @@ parse_args() {
 		--tor) TOR=1; shift ;;
 		--alt-port) ALT_PORT=${2:?--alt-port needs a value}; shift 2 ;;
 		--alt-port=*) ALT_PORT=${1#*=}; shift ;;
+		--web-port) WEB_PORT=${2:?--web-port needs a value}; shift 2 ;;
+		--web-port=*) WEB_PORT=${1#*=}; shift ;;
+		--web-proxy) WEB_PROXY=${2:?--web-proxy needs a value}; shift 2 ;;
+		--web-proxy=*) WEB_PROXY=${1#*=}; shift ;;
 		--persist-bans) PERSIST_BANS=on; shift ;;
 		--no-persist-bans) PERSIST_BANS=off; shift ;;
 		--no-firewall) FIREWALL=0; shift ;;
@@ -151,6 +161,13 @@ parse_args() {
 	if [ -n "$ALT_PORT" ] && [ "$ALT_PORT" != off ]; then
 		[[ "$ALT_PORT" =~ ^[0-9]+$ ]] && [ "$ALT_PORT" -ge 1 ] && [ "$ALT_PORT" -le 65535 ] || die "--alt-port 无效 invalid: $ALT_PORT"
 	fi
+	if [ -n "$WEB_PORT" ] && [ "$WEB_PORT" != off ]; then
+		[[ "$WEB_PORT" =~ ^[0-9]+$ ]] && [ "$WEB_PORT" -ge 1 ] && [ "$WEB_PORT" -le 65535 ] || die "--web-port 无效 invalid: $WEB_PORT"
+	fi
+	case "$WEB_PROXY" in
+	"" | cloudflare | proxy) ;;
+	*) die "--web-proxy 只能是 cloudflare 或 proxy · must be cloudflare or proxy: $WEB_PROXY" ;;
+	esac
 }
 
 # ---------------------------------------------------------------- checks ----
@@ -429,6 +446,17 @@ EOF
 	off) sed -i '/^VIVANT_ALT_ADDR=/d' "$ENV_FILE" ;;
 	*) set_env VIVANT_ALT_ADDR ":$ALT_PORT" ;;
 	esac
+	case "$WEB_PORT" in
+	"") ;;
+	off) sed -i '/^VIVANT_WEB_ADDR=/d; /^VIVANT_WEB_PROXY_HEADER=/d' "$ENV_FILE" ;;
+	*) set_env VIVANT_WEB_ADDR "127.0.0.1:$WEB_PORT" ;;
+	esac
+	if [ -n "$WEB_PORT" ] && [ "$WEB_PORT" != off ] || [ -n "$WEB_PROXY" ]; then
+		case "${WEB_PROXY:-cloudflare}" in
+		cloudflare) set_env VIVANT_WEB_PROXY_HEADER CF-Connecting-IP ;;
+		proxy) set_env VIVANT_WEB_PROXY_HEADER X-Forwarded-For ;;
+		esac
+	fi
 	case "$PERSIST_BANS" in
 	on) set_env VIVANT_BAN_FILE "$STATE_DIR/bans.json" ;;
 	off)
@@ -751,6 +779,14 @@ do_install() {
 		if [ "$ALT_PORT" -lt 1024 ]; then
 			warn "端口 $ALT_PORT 会一直被扫描器探测（30 秒内断开、同样受每地址限额约束）；用户用不上就别开：--alt-port off"
 			warn "port $ALT_PORT is scanned constantly by bots (dropped after 30 s, limited per address); keep it only if users need it: --alt-port off"
+		fi
+	fi
+
+	if [ -n "$WEB_PORT" ] && [ "$WEB_PORT" != off ]; then
+		[ "$WEB_PORT" = "$want" ] && die "--web-port 不能和 SSH 端口相同 · must differ from the SSH port ($want)"
+		owner=$(port_owner "$WEB_PORT")
+		if [ -n "$owner" ] && [ "$owner" != vivant ]; then
+			die "端口 $WEB_PORT 已被 '$owner' 占用，换一个 --web-port · port $WEB_PORT is already in use by '$owner'. Pick another --web-port."
 		fi
 	fi
 

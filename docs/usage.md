@@ -10,6 +10,7 @@
 | 纯文本模式（老终端 / CMD 乱码时） | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
 | 被防火墙拦住（部署者开了备用端口时） | `ssh -o StrictHostKeyChecking=accept-new -p 443 guest@HOST` |
 | 无终端 / 脚本 / 机器人 | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
+| 浏览器 / 只能用 HTTPS（部署者开了网页入口时） | 打开网页入口，例如 `https://chat.HOST`；程序可连 `wss://chat.HOST/ws`（见[网页入口](deploy.md#网页入口浏览器--websocket)） |
 | 通过 Tor（服务器看不到你的 IP） | `torsocks ssh guest@<onion地址>.onion`（见下文） |
 
 - 用户名随便填（`admin` 留给管理员），没有密码，连上直接进聊天室。

@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/Freecode100Year/vivant/internal/chat"
 	"github.com/Freecode100Year/vivant/internal/server"
+	"github.com/Freecode100Year/vivant/internal/web"
 )
 
 var version = "dev"
@@ -48,6 +50,9 @@ func main() {
 		maxLen      = flag.Int("max-len", 500, "单条消息最大字数 · maximum message length in characters")
 		idle        = flag.Duration("idle-timeout", time.Hour, "多久不发言就断开（0 = 不断开）· disconnect sessions silent for this long (0 = never)")
 		motd        = flag.String("motd", envOr("MOTD", ""), "进入时额外显示的公告文本文件（可选）· file with extra welcome lines shown on connect (optional)")
+		webAddr     = flag.String("web-addr", envOr("WEB_ADDR", ""), "网页入口监听地址（浏览器 + WebSocket），例如 127.0.0.1:8080，前面放 HTTPS 反代或 Cloudflare Tunnel · browser/WebSocket entrance, e.g. 127.0.0.1:8080 behind an HTTPS proxy or Cloudflare Tunnel")
+		webProxyHdr = flag.String("web-proxy-header", envOr("WEB_PROXY_HEADER", ""), "网页入口在反代后面时，从这个请求头取真实地址，例如 CF-Connecting-IP 或 X-Forwarded-For（直连时别设，否则可伪造）· header with the real client address when behind a proxy, e.g. CF-Connecting-IP (leave empty for direct connections: it would be forgeable)")
+		webOrigins  = flag.String("web-origins", envOr("WEB_ORIGINS", ""), "额外允许打开 /ws 的网页来源，逗号分隔 · extra browser origins allowed to open /ws, comma separated")
 		healthAddr  = flag.String("health-addr", envOr("HEALTH_ADDR", ""), "在此地址提供 GET /healthz（只返回计数），例如 127.0.0.1:2223 · serve GET /healthz (counts only) here, e.g. 127.0.0.1:2223")
 		verbose     = flag.Bool("v", false, "调试日志 · debug logging")
 		showVersion = flag.Bool("version", false, "显示版本号后退出 · print version and exit")
@@ -131,6 +136,24 @@ func main() {
 	if *healthAddr != "" {
 		go serveHealth(ctx, *healthAddr, hub, log)
 	}
+	if *webAddr != "" {
+		gw := web.New(hub, web.Options{
+			Addr:         *webAddr,
+			ProxyHeader:  *webProxyHdr,
+			Key:          srv.ClientKey,
+			AllowOrigins: splitList(*webOrigins),
+		}, log)
+		l, err := net.Listen("tcp", *webAddr)
+		if err != nil {
+			log.Error("web gateway: cannot listen", "err", err)
+			os.Exit(1)
+		}
+		go func() {
+			if err := gw.Serve(ctx, l); err != nil {
+				log.Error("web gateway failed", "err", err)
+			}
+		}()
+	}
 	log.Info("VIVANT listening", "addr", *addr, "version", version)
 	if err := srv.Run(ctx); err != nil {
 		log.Error("server error", "err", err)
@@ -149,7 +172,7 @@ func (h redactHandler) Handle(ctx context.Context, r slog.Record) error {
 	clean := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
 	r.Attrs(func(a slog.Attr) bool {
 		if redactKeys[strings.ToLower(a.Key)] && !strings.HasPrefix(r.Message, "VIVANT listening") &&
-			r.Message != "health endpoint" && r.Message != "onion listener" && r.Message != "alternate listener" {
+			r.Message != "health endpoint" && r.Message != "onion listener" && r.Message != "alternate listener" && r.Message != "web gateway listening" {
 			a = slog.String(a.Key, "[redacted]")
 		}
 		clean.AddAttrs(a)
