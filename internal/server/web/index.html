@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<title>VIVANT · 匿名聊天室</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="top">
+  <div class="bar">
+    <strong class="brand">VIVANT</strong>
+    <span id="me" class="meta"></span>
+    <span class="spacer"></span>
+    <div class="tools" role="group" aria-label="显示设置 Display">
+      <button type="button" id="font-down" title="字号调小 · Smaller text" aria-label="字号调小 Smaller text">A−</button>
+      <output id="font-size" aria-live="polite">16px</output>
+      <button type="button" id="font-up" title="字号调大 · Bigger text" aria-label="字号调大 Bigger text">A+</button>
+      <button type="button" id="theme" title="换背景：护眼绿、黑、白 · Background: green, black, white" aria-label="换背景 Change background">◐</button>
+    </div>
+    <span id="conn" class="conn" role="status">● 连接中 CONNECTING</span>
+  </div>
+  <nav id="rooms" aria-label="房间 Rooms"></nav>
+</header>
+
+<main>
+  <ol id="log" role="log" aria-live="polite" aria-label="聊天记录 Chat"></ol>
+  <button type="button" id="jump" hidden>新消息 ↓ New messages</button>
+</main>
+
+<footer id="bottom">
+  <div id="topic" class="topic"></div>
+  <form id="composer" autocomplete="off">
+    <span class="prompt" aria-hidden="true">&gt;</span>
+    <input id="input" maxlength="2000" enterkeyhint="send" spellcheck="false" autocapitalize="off"
+      placeholder="说点什么… Type a message…  /help 帮助 help" aria-label="消息 Message">
+    <button type="submit" id="send">发送 Send</button>
+  </form>
+  <div class="hints">
+    <span>Enter 发送 send · ↑↓ 历史 history · 点昵称 @ 对方 tap a nick to @ them</span>
+    <span id="ssh" hidden></span>
+    <span id="ver"></span>
+  </div>
+  <div id="rejoin-box" hidden>
+    <span id="bye"></span>
+    <button type="button" id="rejoin">重新进入 Rejoin</button>
+  </div>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

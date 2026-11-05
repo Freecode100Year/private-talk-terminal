@@ -42,6 +42,16 @@ Host chat
 
 On first connect SSH shows a line like `ED25519 key fingerprint is SHA256:…`. Compare it with the fingerprint the operator published; only if they match are you talking to the real server and not an impostor in the middle. SSH remembers it afterwards and refuses to connect, with a warning, if it ever changes.
 
+## Browser (web entry)
+
+When the operator turned on the web entry (`install.sh --web 8080`), just open the chat's web address in a browser, on a computer or a phone, nothing to install. The web page and SSH share one chat: same rooms, nicknames, private messages, `/help` commands, backgrounds and colours.
+
+- `A−` / `A+` at the top right change the text size (12–40 px), `◐` cycles the background between eye-care green, black and white; typing `/font +`, `/font 20` or `/theme black` works too. Keyboard: Ctrl+Alt+= / Ctrl+Alt+- (⌘+⌥ on a Mac).
+- The browser remembers only those two settings: no messages, no cookies. Closing the tab leaves the chat.
+- Tapping a nickname puts `@nick` in the input box; the room buttons switch rooms, `+N` is unread messages, an orange `@N` means someone mentioned you there.
+- If the connection drops it reconnects by itself and restores the nickname and room you had (a new nickname if someone took yours meanwhile).
+- Privacy is the same as over SSH: the server can read messages. If the page goes through Cloudflare, Cloudflare also sees your IP and the messages; type `/privacy` in the chat to see how this server is set up.
+
 ## iPhone / iPad (iOS)
 
 iOS has no built-in terminal, so you need a third-party SSH client from the App Store and then enter the connection details. Here are the two simplest free ways.
@@ -104,6 +114,7 @@ In the chat, `/help` lists the everyday commands and `/help all` lists everythin
 /bell on|off           bell on mentions and private messages
 /tz <zone>             show times in your timezone: /tz Europe/Berlin, /tz -5, /tz utc
 /theme green|black|white  background: eye-care green (default), black, white (no argument cycles)
+/font + | - | 20 | reset  text size: bigger, smaller, pixels, default (web page; over SSH it explains how to zoom your terminal)
 /privacy               what this server keeps and doesn't
 /forget                erase everything you posted from the room history
 /clear  /quit  /help
@@ -116,7 +127,7 @@ Keys: ↑↓ input history, PgUp/PgDn scroll the chat, Tab completes nicknames a
 
 **Background and colours (colour-blind and low-vision friendly):** the default is black text on an eye-care green background. Type `/theme` to cycle between green, black and white backgrounds, or pick one with `/theme black`, `/theme white`, `/theme green`. To start with black or white, log in as `black@HOST` or `white@HOST` instead of the usual user name. On all three backgrounds every colour — body text, timestamps, nicknames, hints, errors — is at least 7:1 contrast (WCAG AAA); body text is 19:1 or more. Colours come from the colour-blind-safe Okabe–Ito family and never depend on telling red from green; important things carry a symbol as well as a colour: a `»` band means someone mentioned you, `!` an error, `▸` the current room. Only 256 colours are used, so old terminals and phone SSH apps look the same. While you chat the whole terminal window, padding included, takes the theme colour and goes back to normal when you leave; if the network drops instead, the green may linger — close the tab (or type `reset` on Linux/macOS).
 
-**Font:** your own terminal picks the font; the server can't set it. For a clean sans-serif (黑体) that keeps Chinese and Latin aligned, try the free monospace Sarasa Mono SC. Windows Terminal: Settings → Profiles → Appearance → Font face → `Sarasa Mono SC`, and size 14–16 if you like it larger. macOS Terminal: Settings → Profiles → Text → Font. Phone SSH apps usually have it under Appearance or Terminal.
+**Font and text size:** on the web page, use `A−` / `A+` or `/font`. Over SSH your terminal owns the font and its size, and the server can't set them; `/font` tells you how to zoom: Ctrl + = bigger, Ctrl + - smaller, Ctrl + 0 reset in Windows Terminal and Linux terminals; ⌘ instead of Ctrl in macOS Terminal and iTerm2; pinch to zoom in phone SSH apps. For a clean sans-serif (黑体) that keeps Chinese and Latin aligned, try the free monospace Sarasa Mono SC. Windows Terminal: Settings → Profiles → Appearance → Font face → `Sarasa Mono SC`, and size 14–16 if you like it larger. macOS Terminal: Settings → Profiles → Text → Font. Phone SSH apps usually have it under Appearance or Terminal.
 
 **Bell:** when someone mentions you or sends you a private message, the terminal rings (phone SSH apps usually vibrate or notify). Don't want it? `/bell off`.
 

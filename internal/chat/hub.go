@@ -78,9 +78,10 @@ type Config struct {
 	OnionPerMin   int           // new Tor sessions per minute
 	Motd          []string      // extra lines shown on connect
 	// Facts about the deployment that /privacy reports to users.
-	PersistBans bool // address-hash key stored on disk (-ban-file)
-	TorEnabled  bool // an onion listener is configured
-	TorExits    bool // Tor exit relays share the Tor bucket
+	PersistBans bool   // address-hash key stored on disk (-ban-file)
+	TorEnabled  bool   // an onion listener is configured
+	TorExits    bool   // Tor exit relays share the Tor bucket
+	WebProxy    string // "" = no web entry; otherwise "none", "local" or "cloudflare"
 	// QuietAbove: in rooms with more members than this, individual
 	// join/leave lines are replaced by a periodic summary (FlushPresence).
 	// 0 = default (20); negative = never collapse.
@@ -193,6 +194,8 @@ type Client struct {
 	mentioned   map[string]bool   // rooms where the client was @mentioned while away
 	noBell      bool              // /bell off
 	theme       string            // /theme: ThemeGreen (default), ThemeDark or ThemeLight
+	font        int               // /font: text size in px for the web page (0 = FontDefault)
+	web         bool              // connected through the web page, not SSH
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -497,6 +500,8 @@ func (h *Hub) command(c *Client, line string) Result {
 		h.tzLocked(c, rest)
 	case "theme", "bg", "color", "colour":
 		h.themeLocked(c, rest)
+	case "font", "size", "zoom", "fontsize", "字号", "字体", "字体大小":
+		h.fontLocked(c, rest)
 	case "whoami":
 		h.infof(c, "你是 %s，在 %s。", "You are %s in %s.", c.nick, h.roomLabel(c.room))
 	// --- admin ---
@@ -555,7 +560,7 @@ func (h *Hub) helpLocked(c *Client, arg string) {
 				{"/msg <昵称 nick> <内容 text>", "私聊", "private message"},
 				{"/nick <名字 name>", "改昵称", "change nickname"},
 				{"/who", "谁在这里", "who is here"},
-				{"/theme", "换背景：护眼绿（默认）、黑、白", "background: green, black, white"},
+				{"/theme  /font + -", "换背景（护眼绿、黑、白）、调字号", "background (green, black, white), text size"},
 				{"/quit", "退出", "leave"},
 				{"/help all", "全部命令", "all commands"},
 			})})
@@ -582,6 +587,7 @@ func (h *Hub) helpLocked(c *Client, arg string) {
 		{"/tz <时区 zone>", "按你的时区显示时间，如 /tz +8", "show times in your timezone, e.g. /tz -5"},
 		{"/bell on|off", "被 @ 或收到私聊时响铃（默认开）", "bell on mentions and private messages (default on)"},
 		{"/theme green|black|white", "背景色：护眼绿（默认）、黑、白；不带参数则轮换", "background: eye-care green (default), black, white; no argument cycles"},
+		{"/font + | - | 20 | reset", "字号：调大、调小、指定像素、恢复默认", "text size: bigger, smaller, pixels, default"},
 		{"/clear  /quit", "清屏、退出", "clear the screen, leave"},
 	}
 	if c.admin {
@@ -1316,6 +1322,16 @@ func (h *Hub) privacyLocked(c *Client) {
 		tor += "；用 Tor 浏览器直连也欢迎，Tor 用户共用一组宽松限额"
 		torEn += "; Tor Browser users are welcome and share generous limits"
 	}
+	web, webEn := "未开启", "off"
+	switch h.cfg.WebProxy {
+	case "":
+	case "cloudflare":
+		web, webEn = "已开启；经 Cloudflare 转发时，Cloudflare 也能看到你的 IP 和聊天内容；浏览器只记住字号和背景",
+			"on; when it goes through Cloudflare, Cloudflare also sees your IP and the messages; the browser keeps only your text size and background"
+	default:
+		web, webEn = "已开启；和 SSH 一样，服务器能看到聊天内容；浏览器只记住字号和背景",
+			"on; like SSH, the server sees the messages; the browser keeps only your text size and background"
+	}
 	idle, idleEn := "不限", "none"
 	if h.cfg.IdleKick > 0 {
 		idle, idleEn = h.cfg.IdleKick.String(), h.cfg.IdleKick.String()
@@ -1326,6 +1342,7 @@ func (h *Hub) privacyLocked(c *Client) {
 		"地址   只用来限流和封禁，以匿名哈希保存，不显示给任何人（包括管理员）",
 		"封禁   " + bans,
 		"Tor    " + tor,
+		"网页   " + web,
 		"空闲   " + idle + " 不发言自动断开",
 		"管理员 可以踢出、禁言、封禁（都会公开显示）；看不到私聊，聊天室里也没有查看 IP 的功能",
 		"删除   /forget 立刻从房间历史中删除你本次连接发过的所有消息",
@@ -1338,6 +1355,7 @@ func (h *Hub) privacyLocked(c *Client) {
 		"Addresses  used only for rate limits and bans, kept as anonymous hashes, shown to no one (admins included)",
 		"Bans       " + bansEn,
 		"Tor        " + torEn,
+		"Web        " + webEn,
 		"Idle       disconnected after " + idleEn + " without posting",
 		"Admins     can kick, mute and ban (always shown publicly); can't read private messages; no IP lookup in the chat",
 		"Erase      /forget removes everything you posted this session from room history, now",
@@ -1544,6 +1562,8 @@ type Status struct {
 	Bell      bool // ring on @mentions and private messages
 	Loc       *time.Location
 	Theme     string // ThemeGreen (default), ThemeDark or ThemeLight
+	Font      int    // text size in px for the web page (FontMin..FontMax)
+	Web       bool   // the client uses the web page
 }
 
 // Status returns the current view of the world for client c.
@@ -1560,6 +1580,11 @@ func (h *Hub) Status(c *Client) Status {
 		Loc:    c.loc,
 		Bell:   !c.noBell,
 		Theme:  c.theme,
+		Font:   c.font,
+		Web:    c.web,
+	}
+	if s.Font == 0 {
+		s.Font = FontDefault
 	}
 	if s.Theme == "" {
 		s.Theme = themeOrder[0]

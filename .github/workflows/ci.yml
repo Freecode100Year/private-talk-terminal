@@ -168,6 +168,25 @@ jobs:
           ss -ltn > /tmp/ss.txt
           if grep -q ':443 ' /tmp/ss.txt; then echo "443 still open"; exit 1; fi
 
+      - name: Web entry
+        run: |
+          exec > >(tee -a /tmp/ci-logs/web.log) 2>&1
+          set -x
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --web 8080
+          grep -q '^VIVANT_WEB_ADDR=:8080' /etc/vivant.env
+          grep -q '^VIVANT_WEB_PROXY=cloudflare' /etc/vivant.env
+          grep -q '^VIVANT_WEB_SSH=ssh -p 2222 guest@localhost' /etc/vivant.env
+          for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 0.5; done
+          curl -fsS http://127.0.0.1:8080/ | grep -q VIVANT
+          curl -fsSI http://127.0.0.1:8080/app.js | grep -qi "content-security-policy"
+          sudo vivant-ctl status | grep -q "Web:"
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --web 8080 --web-proxy local
+          ss -ltn > /tmp/ss.txt
+          grep -q '127.0.0.1:8080 ' /tmp/ss.txt
+          sudo VIVANT_DOWNLOAD_BASE=http://127.0.0.1:8765 vivant-ctl install --web off
+          ss -ltn > /tmp/ss.txt
+          if grep -q ':8080 ' /tmp/ss.txt; then echo "8080 still open"; exit 1; fi
+
       - name: Persistent bans
         run: |
           exec > >(tee -a /tmp/ci-logs/persist-bans.log) 2>&1

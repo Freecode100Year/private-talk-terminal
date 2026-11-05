@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml/badge.svg)](https://github.com/Freecode100Year/vivant/actions/workflows/ci.yml)
 
-One SSH command and you're in the chat room. No sign-up, no password, no app.
+One SSH command and you're in the chat room — or just open it in a browser. No sign-up, no password, no app.
 
 ```
 ssh -p 2222 guest@term.freedom8964.com
@@ -28,6 +28,8 @@ Every prompt, the help and the key hints are shown in both Simplified Chinese an
 
 **Computer** (Windows, macOS and Linux all ship ssh): run the command above. On first connect SSH asks whether to trust the server; type `yes`.
 
+**Browser** (when the operator turned on the web entry): open the chat's web address; you're in the same rooms as the SSH users. `A−` / `A+` at the top right change the text size, `◐` the background; the browser remembers only those two settings.
+
 **iPhone / iPad**:
 
 - **iSH Shell**: free on the App Store. Run `apk add openssh-client` once, then the command above.
@@ -45,6 +47,7 @@ Just type to talk.
 /msg <nick> <text>   private message
 /nick <name>         change your nickname
 /who                 who is here
+/font + or /font -   bigger or smaller text (web page; over SSH it explains how to zoom your terminal)
 /help all            every command
 ```
 
@@ -64,7 +67,7 @@ On a Linux VPS:
 curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install.sh | sudo bash
 ```
 
-Manage it with `sudo vivant-ctl status | upgrade | uninstall`. If people can't connect, run `sudo vivant-ctl doctor`: it checks everything and tells you how to fix it. Remember to allow TCP 2222 in your cloud provider's firewall, and on Cloudflare set the DNS record to DNS only (grey cloud). Docker works too, see [Deployment and configuration](docs/deploy.en.md#docker-optional).
+To let people join from a browser too, add `--web 8080`, see [Web entry](docs/deploy.en.md#web-entry). Manage it with `sudo vivant-ctl status | upgrade | uninstall`. If people can't connect, run `sudo vivant-ctl doctor`: it checks everything and tells you how to fix it. Remember to allow TCP 2222 in your cloud provider's firewall, and on Cloudflare set the DNS record to DNS only (grey cloud). Docker works too, see [Deployment and configuration](docs/deploy.en.md#docker-optional).
 
 **Server can't reach GitHub:** download the offline one-click installer from the release page and run `bash vivant-<version>-linux-offline.sh --to root@SERVER` on your computer, see [Offline install](docs/deploy.en.md#offline-install-server-cant-reach-github). For a temporary server on Windows / macOS (testing, LAN), the release page has those binaries too, see [Deployment and configuration](docs/deploy.en.md#windows--macos).
 
@@ -89,6 +92,8 @@ Improvements chosen after studying similar projects (ssh-chat, devzat, SoftRoom,
 - [x] **External monitoring, passphrase design rule**: documented (from devzat, ssh-chat, sshoosh)
 - [x] **Hardening after a security review**: modern SSH algorithms only, invisible and tag characters stripped (with a fuzz test), global TCP cap, fresh ban key when no ban is active
 - [x] **Renamed to VIVANT**: old servers migrate by running the installer
+- [x] **Text size**: `/font +`, `/font -`, `/font 20`, `/font reset`; `A−` / `A+` on the web page, 12 to 40 px; over SSH, `/font` explains how to zoom each terminal (the terminal owns the font)
+- [x] **Web entry**: chat from a browser — same rooms, people, commands and colours as SSH; no plug-ins, no external resources on the page; deploy with `--web 8080` (WebSocket code from [HTML Room](https://github.com/Freecode100Year/htmlroom), proxy and same-origin checks from [Private Talk](https://github.com/Freecode100Year/private-talk))
 - [x] **Offline one-click install**: one self-extracting file, `--to root@SERVER` deploys straight from your computer; plus Windows / macOS binaries for testing and LANs
 
 ## Documentation

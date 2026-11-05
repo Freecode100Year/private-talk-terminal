@@ -59,6 +59,10 @@ type Options struct {
 	BanFile       string   // optional: persist bans here (see bans.go for the privacy trade-off)
 	AltAddrs      []string // extra listen addresses, e.g. ":443" for networks that block other ports
 	TorExits      bool     // fetch Tor's exit list so Tor Browser users share the Tor bucket
+	WebAddr       string   // optional HTTP listener for the web page (e.g. 127.0.0.1:2280)
+	WebProxy      string   // ProxyNone, ProxyLocal or ProxyCloudflare: who tells us the client address
+	WebSSH        string   // optional SSH command shown on the web page
+	Version       string   // shown on the web page
 }
 
 // OnionKey is the shared rate-limit key for everyone arriving via Tor: the
@@ -131,12 +135,22 @@ type Server struct {
 	altAddrs   []string
 	torExitsOn bool
 	torExits   atomic.Pointer[exitSet]
+
+	webAddr, webProxy, webSSH, version string
 }
 
 // New builds the SSH server around hub.
 func New(hub *chat.Hub, opt Options, log *slog.Logger) (*Server, error) {
 	s := &Server{hub: hub, log: log, salt: make([]byte, 32), tcpConns: map[string]int{}, tcpMax: opt.MaxTCPPerIP,
-		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs, torExitsOn: opt.TorExits}
+		adminUser: strings.ToLower(opt.AdminUser), onionAddr: opt.OnionAddr, onionMax: opt.OnionMaxTCP, altAddrs: opt.AltAddrs, torExitsOn: opt.TorExits,
+		webAddr: opt.WebAddr, webSSH: opt.WebSSH, version: opt.Version}
+	if s.webAddr != "" {
+		mode, err := ParseProxyMode(opt.WebProxy)
+		if err != nil {
+			return nil, err
+		}
+		s.webProxy = mode
+	}
 	if s.tcpMax <= 0 {
 		s.tcpMax = 8
 	}
@@ -462,7 +476,7 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
 func (s *Server) Run(ctx context.Context) error {
-	errc := make(chan error, 2+len(s.altAddrs))
+	errc := make(chan error, 3+len(s.altAddrs))
 	go func() {
 		if err := s.ListenAndServe(); err != nil && !errors.Is(err, ssh.ErrServerClosed) {
 			errc <- err
@@ -491,6 +505,9 @@ func (s *Server) Run(ctx context.Context) error {
 				errc <- err
 			}
 		}()
+	}
+	if s.webAddr != "" {
+		go s.serveWeb(ctx, errc)
 	}
 	if s.torExitsOn {
 		go s.refreshTorExits(ctx)
