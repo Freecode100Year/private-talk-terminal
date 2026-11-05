@@ -76,6 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 
 参考同类项目（ssh-chat、devzat、SoftRoom、sshoosh、SSHChat）后定下的改进，按顺序进行。原则：不增加新用户要学的东西，不削弱匿名。
 
+- [x] **色盲、视力差友好的配色**：`/theme` 切换黑、白、护眼绿背景，三种背景下对比度都达到 WCAG AA（正文 AAA）；@你 的消息是橙色高亮条，`@昵称` 加下划线
 - [x] **被 @、收到私聊时响铃**：默认开启，`/bell off` 关闭（借鉴 devzat）
 - [x] **人多时折叠进出提示**：合并成“3 人进入、2 人离开”（借鉴 ssh-chat `/quiet`）
 - [x] **备用 443 端口**：安装时加 `--alt-port 443`，给被防火墙拦住的用户一条路（借鉴 devzat）

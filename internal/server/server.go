@@ -447,6 +447,9 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 			_ = sess.Exit(0)
 			return
 		}
+		// `ssh white@host`, `ssh green@host`, `ssh black@host` pick the
+		// background at login; any other user name keeps the default.
+		s.hub.SetTheme(c, sess.User())
 		pty, winCh, _ := sess.Pty()
 		msg := ui.RunTerm(sess, s.hub, c, pty.Window.Width, pty.Window.Height, winCh)
 		if msg != "" {

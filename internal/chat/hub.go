@@ -192,6 +192,7 @@ type Client struct {
 	seen        map[string]uint64 // room -> room.seq when the client last left/joined it
 	mentioned   map[string]bool   // rooms where the client was @mentioned while away
 	noBell      bool              // /bell off
+	theme       string            // /theme: ThemeDark, ThemeLight or ThemeGreen
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
@@ -494,6 +495,8 @@ func (h *Hub) command(c *Client, line string) Result {
 		h.forgetLocked(c)
 	case "tz", "time":
 		h.tzLocked(c, rest)
+	case "theme", "bg", "color", "colour":
+		h.themeLocked(c, rest)
 	case "whoami":
 		h.infof(c, "你是 %s，在 %s。", "You are %s in %s.", c.nick, h.roomLabel(c.room))
 	// --- admin ---
@@ -552,6 +555,7 @@ func (h *Hub) helpLocked(c *Client, arg string) {
 				{"/msg <昵称 nick> <内容 text>", "私聊", "private message"},
 				{"/nick <名字 name>", "改昵称", "change nickname"},
 				{"/who", "谁在这里", "who is here"},
+				{"/theme", "背景：黑、白、护眼绿", "background: black, white, eye-care green"},
 				{"/quit", "退出", "leave"},
 				{"/help all", "全部命令", "all commands"},
 			})})
@@ -577,6 +581,7 @@ func (h *Hub) helpLocked(c *Client, arg string) {
 		{"", "其他", "other"},
 		{"/tz <时区 zone>", "按你的时区显示时间，如 /tz +8", "show times in your timezone, e.g. /tz -5"},
 		{"/bell on|off", "被 @ 或收到私聊时响铃（默认开）", "bell on mentions and private messages (default on)"},
+		{"/theme black|white|green", "背景色：黑、白、护眼绿（不带参数则轮换）", "background: black, white, eye-care green (no argument cycles)"},
 		{"/clear  /quit", "清屏、退出", "clear the screen, leave"},
 	}
 	if c.admin {
@@ -1221,6 +1226,73 @@ func (h *Hub) bellLocked(c *Client, arg string) {
 	}
 }
 
+// Display themes (background colours) a client can pick with /theme.
+const (
+	ThemeDark  = "dark"
+	ThemeLight = "light"
+	ThemeGreen = "green"
+)
+
+var themeOrder = []string{ThemeDark, ThemeLight, ThemeGreen}
+
+// ParseTheme maps a user-supplied name ("black", "white", "护眼", ...) to a
+// theme.
+func ParseTheme(s string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "dark", "black", "黑", "黑色", "暗", "深色":
+		return ThemeDark, true
+	case "light", "white", "白", "白色", "亮", "浅色":
+		return ThemeLight, true
+	case "green", "eye", "eyecare", "eye-care", "绿", "绿色", "护眼", "护眼绿":
+		return ThemeGreen, true
+	}
+	return "", false
+}
+
+func themeLabel(t string) (zh, en string) {
+	switch t {
+	case ThemeLight:
+		return "白色", "white"
+	case ThemeGreen:
+		return "护眼绿", "eye-care green"
+	}
+	return "黑色", "black"
+}
+
+func (h *Hub) themeLocked(c *Client, arg string) {
+	cur := c.theme
+	if cur == "" {
+		cur = ThemeDark
+	}
+	next, ok := ParseTheme(arg)
+	switch {
+	case strings.TrimSpace(arg) == "":
+		for i, t := range themeOrder {
+			if t == cur {
+				next = themeOrder[(i+1)%len(themeOrder)]
+			}
+		}
+	case !ok:
+		h.errorf(c, "用法：/theme black（黑）、/theme white（白）、/theme green（护眼绿）", "Usage: /theme black | /theme white | /theme green")
+		return
+	}
+	c.theme = next
+	zh, en := themeLabel(next)
+	c.send(&Event{Kind: KindInfo, Text: "背景已换成" + zh + "。再输入 /theme 可轮换。", En: "Background is now " + en + ". Type /theme again to cycle."})
+}
+
+// SetTheme sets the client's theme without a message (e.g. chosen by the SSH
+// user name at login). Unknown names are ignored.
+func (h *Hub) SetTheme(c *Client, name string) {
+	t, ok := ParseTheme(name)
+	if !ok {
+		return
+	}
+	h.mu.Lock()
+	c.theme = t
+	h.mu.Unlock()
+}
+
 // BellOn reports whether the client wants a bell on mentions and DMs.
 func (h *Hub) BellOn(c *Client) bool {
 	h.mu.Lock()
@@ -1470,6 +1542,7 @@ type Status struct {
 	Muted     bool
 	Bell      bool // ring on @mentions and private messages
 	Loc       *time.Location
+	Theme     string // ThemeDark, ThemeLight or ThemeGreen
 }
 
 // Status returns the current view of the world for client c.
@@ -1485,6 +1558,10 @@ func (h *Hub) Status(c *Client) Status {
 		Muted:  !c.mutedUntil.IsZero() && time.Now().Before(c.mutedUntil),
 		Loc:    c.loc,
 		Bell:   !c.noBell,
+		Theme:  c.theme,
+	}
+	if s.Theme == "" {
+		s.Theme = ThemeDark
 	}
 	s.RoomLabel = h.roomLabel(c.room)
 	if r := h.rooms[c.room]; r != nil {

@@ -8,14 +8,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
-func nickColor(n string) sgr {
+func (t *Theme) nickColor(n string) paint {
 	h := fnv.New32a()
 	h.Write([]byte(strings.ToLower(n)))
-	return nickPalette[h.Sum32()%uint32(len(nickPalette))]
+	return t.Nicks[h.Sum32()%uint32(len(t.Nicks))]
 }
 
 // Formatter turns events into display lines.
@@ -23,6 +25,14 @@ type Formatter struct {
 	Styled bool
 	Self   func() string         // current nickname of the viewer
 	Loc    func() *time.Location // viewer's timezone (nil = server local)
+	Theme  *Theme                // colours (nil = dark)
+}
+
+func (f Formatter) th() *Theme {
+	if f.Theme == nil {
+		return themeDark
+	}
+	return f.Theme
 }
 
 // bi joins a Chinese and an English text: every piece of interface text is
@@ -34,7 +44,7 @@ func bi(zh, en string) string { return zh + " · " + en }
 // next line.
 const joinWidth = 78
 
-func (f Formatter) st(c sgr, s string) string {
+func (f Formatter) st(c paint, s string) string {
 	if !f.Styled {
 		return s
 	}
@@ -46,9 +56,10 @@ func (f Formatter) st(c sgr, s string) string {
 // mentioning them) gets the same strings. A message to a busy room is then
 // formatted a handful of times instead of once per connected user.
 type renderKey struct {
-	id   uint64
-	loc  *time.Location
-	hist bool
+	id    uint64
+	loc   *time.Location
+	theme *Theme
+	hist  bool
 }
 
 var (
@@ -90,7 +101,7 @@ func (f Formatter) Lines(ev chat.Event) []string {
 	if f.Loc != nil {
 		loc = f.Loc()
 	}
-	k := renderKey{id: ev.ID, loc: loc, hist: ev.History}
+	k := renderKey{id: ev.ID, loc: loc, theme: f.th(), hist: ev.History}
 	if v, ok := renderCache.Load(k); ok {
 		return v.([]string)
 	}
@@ -103,7 +114,7 @@ func (f Formatter) lines(ev chat.Event) []string {
 	if ev.History && f.Styled { // replayed history: whole line dimmed
 		lines := Formatter{Self: f.Self, Loc: f.Loc}.lines(ev)
 		for i := range lines {
-			lines[i] = sDim.R(lines[i])
+			lines[i] = f.th().Dim.R(lines[i])
 		}
 		return lines
 	}
@@ -126,7 +137,8 @@ func (f Formatter) lines(ev chat.Event) []string {
 			t = t.In(loc)
 		}
 	}
-	ts := f.st(sDim, "["+t.Format("15:04")+"] ")
+	th := f.th()
+	ts := f.st(th.Dim, "["+t.Format("15:04")+"] ")
 	self := ""
 	if f.Self != nil {
 		self = f.Self()
@@ -136,17 +148,23 @@ func (f Formatter) lines(ev chat.Event) []string {
 			return n
 		}
 		if n == self {
-			return sSelf.R(n)
+			return th.Self.R(n)
 		}
-		return nickColor(n).R(n)
+		return th.nickColor(n).R(n)
 	}
 
 	text := ev.Text
-	if (ev.Kind == chat.KindChat || ev.Kind == chat.KindAction) && ev.From != self && Mentions(text, self) {
-		if f.Styled {
-			text = sMention.R(text)
-		} else {
-			text = "» " + text
+	if ev.Kind == chat.KindChat || ev.Kind == chat.KindAction {
+		switch {
+		case ev.From != self && Mentions(text, self):
+			// a solid band plus a marker: visible without telling colours apart
+			if f.Styled {
+				text = th.Mention.R("» " + text + " ")
+			} else {
+				text = "» " + text
+			}
+		case f.Styled:
+			text = highlightTags(text, th.Tag)
 		}
 	}
 	var head string
@@ -156,23 +174,23 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindAction:
 		head = ts + "* " + nick(ev.From) + " " + text
 	case chat.KindSystem:
-		head = ts + f.st(sDim, "-- "+ev.Text)
+		head = ts + f.st(th.Dim, "-- "+ev.Text)
 	case chat.KindDMIn:
-		head = ts + f.st(sDM, "[私信 DM ← "+ev.From+"] ") + ev.Text
+		head = ts + f.st(th.DM, "[私信 DM ← "+ev.From+"] ") + ev.Text
 	case chat.KindDMOut:
-		head = ts + f.st(sDM, "[私信 DM → "+ev.To+"] ") + ev.Text
+		head = ts + f.st(th.DM, "[私信 DM → "+ev.To+"] ") + ev.Text
 	case chat.KindInfo:
-		head = ts + f.st(sInfo, "* "+ev.Text)
+		head = ts + f.st(th.Info, "* "+ev.Text)
 	case chat.KindError:
-		head = ts + f.st(sError, "! "+ev.Text)
+		head = ts + f.st(th.Error, "! "+ev.Text)
 	case chat.KindMention:
-		head = ts + f.st(sMention, "@ #"+ev.Room+" <"+ev.From+"> ") + ev.Text + f.st(sDim, "  · /join "+ev.Room)
+		head = ts + f.st(th.Mention, "@ #"+ev.Room+" <"+ev.From+"> ") + " " + ev.Text + f.st(th.Dim, "  · /join "+ev.Room)
 	case chat.KindNotice:
 		from := "系统 System"
 		if ev.From != "" {
 			from = "管理员 Admin " + ev.From
 		}
-		head = ts + f.st(sNotice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
+		head = ts + f.st(th.Notice, fmt.Sprintf("📢 [%s] %s", from, ev.Text))
 	default:
 		head = ts + ev.Text
 	}
@@ -180,9 +198,9 @@ func (f Formatter) lines(ev chat.Event) []string {
 	body := func(l string, en bool) {
 		switch {
 		case en:
-			out = append(out, "        "+f.st(sDim, l))
+			out = append(out, "        "+f.st(th.Dim, l))
 		case ev.Kind == chat.KindInfo || ev.Kind == chat.KindError:
-			out = append(out, "        "+f.st(sInfo, l))
+			out = append(out, "        "+f.st(th.Info, l))
 		default:
 			out = append(out, "        "+l)
 		}
@@ -197,6 +215,44 @@ func (f Formatter) lines(ev chat.Event) []string {
 		}
 	}
 	return out
+}
+
+// highlightTags styles every "@nick" in text, so a mention of someone stands
+// out from ordinary words (underlined, not just coloured). "@" inside a word
+// (an e-mail address) is left alone.
+func highlightTags(text string, p paint) string {
+	if strings.IndexByte(text, '@') < 0 {
+		return text
+	}
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(text); {
+		if text[i] != '@' || (i > 0 && isWordByte(strings.ToLower(text[i-1:i]), 0)) {
+			i++
+			continue
+		}
+		j, n := i+1, 0
+		for j < len(text) {
+			r, sz := utf8.DecodeRuneInString(text[j:])
+			if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-') || n == 16 {
+				break
+			}
+			j += sz
+			n++
+		}
+		if n < 2 { // nicknames are at least 2 characters
+			i = j
+			continue
+		}
+		b.WriteString(text[last:i])
+		b.WriteString(p.R(text[i:j]))
+		last, i = j, j
+	}
+	if last == 0 {
+		return text
+	}
+	b.WriteString(text[last:])
+	return b.String()
 }
 
 // Uptime formats a duration as "4d 12h" / "3h 5m" / "42m".

@@ -81,6 +81,7 @@ type Term struct {
 	c      *chat.Client
 	fmt    Formatter
 	status chat.Status
+	th     *Theme
 	width  int
 	height int
 
@@ -109,6 +110,7 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 	t := &Term{w: rw, hub: hub, c: c, width: width, height: height, last: map[int]string{}}
 	t.fmt = Formatter{Styled: true, Self: func() string { return t.status.Nick }, Loc: func() *time.Location { return t.status.Loc }}
 	t.status = hub.Status(c)
+	t.setTheme(t.status.Theme)
 
 	keys := make(chan key, 64)
 	stop := make(chan struct{})
@@ -124,7 +126,7 @@ func RunTerm(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, width, height int,
 	t.fullRedraw()
 	t.flush()
 	defer func() {
-		t.out.WriteString("\x1b[r\x1b[?2004l\x1b[?1049l")
+		t.out.WriteString("\x1b[0m\x1b[r\x1b[?2004l\x1b[?1049l")
 		t.flush()
 	}()
 
@@ -227,15 +229,47 @@ func (t *Term) render(ev *chat.Event) []string {
 			continue
 		}
 		// continuation lines are indented under the message text
+		// and keep the style a line was cut in (a mention band, an error),
+		// since every row ends by returning to the theme's base colours.
 		const indent = "        "
+		carry := ""
 		for i, wl := range strings.Split(ansi.Wrap(l, w-len(indent), ""), "\n") {
 			if i > 0 {
-				wl = indent + wl
+				wl = indent + carry + wl
 			}
+			carry = activeStyle(wl, t.th.Base)
 			out = append(out, truncate(wl, w, ""))
 		}
 	}
 	return out
+}
+
+// activeStyle returns the SGR sequence still in effect at the end of s, or ""
+// if s ends in the base style. Theme styles are each a single complete SGR,
+// so the last one seen is the whole state.
+func activeStyle(s, base string) string {
+	last := ""
+	for i := strings.Index(s, "\x1b["); i >= 0; {
+		j := i + 2
+		for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+			j++
+		}
+		if j >= len(s) {
+			break
+		}
+		if s[j] == 'm' {
+			last = s[i : j+1]
+		}
+		k := strings.Index(s[j:], "\x1b[")
+		if k < 0 {
+			break
+		}
+		i = j + k
+	}
+	if last == base || last == "\x1b[m" || last == "\x1b[0m" {
+		return ""
+	}
+	return last
 }
 
 // addEvent appends and draws an event; it reports whether the event may have
@@ -263,10 +297,12 @@ func (t *Term) addEvent(ev *chat.Event) (statusStale bool) {
 	// Scroll the chat region: put the cursor on its last row and emit a
 	// newline per line; the terminal shifts the region up by itself.
 	t.moveTo(t.chatBot(), 1)
+	t.out.WriteString(t.th.Base) // the scrolled-in row takes the current background
 	for _, l := range r {
 		t.out.WriteString("\n\r")
 		t.out.WriteString(l)
-		t.out.WriteString("\x1b[0m\x1b[K")
+		t.out.WriteString(t.th.Base)
+		t.out.WriteString("\x1b[K")
 	}
 	t.placeCursor()
 	return statusStale
@@ -323,7 +359,11 @@ func (t *Term) scrollBy(n int) {
 
 func (t *Term) fullRedraw() {
 	t.last = map[int]string{}
-	t.out.WriteString("\x1b[r\x1b[0m\x1b[H\x1b[2J")
+	// Base before erasing: the terminal fills cleared cells with the current
+	// background, which paints the whole screen in the theme's colour.
+	t.out.WriteString("\x1b[r")
+	t.out.WriteString(t.th.Base)
+	t.out.WriteString("\x1b[H\x1b[2J")
 	if t.tooSmall() {
 		t.out.WriteString(bi("窗口太小", "Window too small"))
 		return
@@ -349,7 +389,7 @@ func (t *Term) drawChat() {
 		t.moveTo(t.chatTop()+i, 1)
 		if i >= pad {
 			t.out.WriteString(vis[i-pad])
-			t.out.WriteString("\x1b[0m")
+			t.out.WriteString(t.th.Base)
 		}
 		t.out.WriteString("\x1b[K")
 	}
@@ -364,14 +404,26 @@ func (t *Term) drawFixed(row int, content string) {
 	t.out.WriteString("\x1b7") // save cursor
 	t.moveTo(row, 1)
 	t.out.WriteString(content)
-	t.out.WriteString("\x1b[0m\x1b[K\x1b8")
+	t.out.WriteString(t.th.Base)
+	t.out.WriteString("\x1b[K\x1b8")
 }
 
 func (t *Term) refreshStatus() {
 	t.status = t.hub.Status(t.c)
+	if t.th == nil || t.status.Theme != t.th.Name {
+		t.setTheme(t.status.Theme)
+		t.fullRedraw()
+		return
+	}
 	t.drawFixed(1, t.headerLine())
 	t.drawFixed(2, t.roomsLine())
 	t.drawSeparator()
+}
+
+// setTheme switches colours; the caller redraws.
+func (t *Term) setTheme(name string) {
+	t.th = themeByName(name)
+	t.fmt.Theme = t.th
 }
 
 func (t *Term) headerLine() string {
@@ -386,21 +438,21 @@ func (t *Term) headerLine() string {
 		right = fmt.Sprintf(" %s · %d online ", s.Nick, s.Online)
 	}
 	gap := max(0, t.width-width(left)-width(right))
-	return truncate(sHeader.R(left)+sHeaderDim.R(strings.Repeat(" ", gap)+right), t.width, "")
+	return truncate(t.th.Header.R(left)+t.th.HeaderDim.R(strings.Repeat(" ", gap)+right), t.width, "")
 }
 
 func (t *Term) roomsLine() string {
 	var b strings.Builder
-	b.WriteString(sDim.R("房间 ROOMS "))
+	b.WriteString(t.th.Dim.R("房间 ROOMS "))
 	for _, r := range t.status.Rooms {
 		item := fmt.Sprintf("%s %d", r.Label, r.Users)
 		switch {
 		case r.Current:
-			b.WriteString(sCurRoom.R("▸" + item))
+			b.WriteString(t.th.CurRoom.R("▸" + item))
 		case r.Mentioned:
-			b.WriteString(" " + item + sError.R(fmt.Sprintf(" @%s", unreadLabel(r.Unread))))
+			b.WriteString(" " + item + t.th.Error.R(fmt.Sprintf(" @%s", unreadLabel(r.Unread))))
 		case r.Unread > 0:
-			b.WriteString(" " + item + sNotice.R(" +"+unreadLabel(r.Unread)))
+			b.WriteString(" " + item + t.th.Notice.R(" +"+unreadLabel(r.Unread)))
 		default:
 			b.WriteString(" " + item)
 		}
@@ -423,29 +475,29 @@ func (t *Term) drawSeparator() {
 		txt += " · " + s.Topic
 	}
 	txt += " "
-	line := sDim.R(txt)
+	line := t.th.Dim.R(txt)
 	if s.Muted {
-		line += sError.R("[MUTED] ")
+		line += t.th.Error.R("[MUTED] ")
 	}
 	if s.Admin {
-		line += sNotice.R("[ADMIN] ")
+		line += t.th.Notice.R("[ADMIN] ")
 	}
 	if t.scroll > 0 {
 		more := fmt.Sprintf("↑ 已上翻 scrolled %d", t.scroll)
 		if t.unseen > 0 {
 			more = fmt.Sprintf("↓ %d 条新消息 new", t.unseen)
 		}
-		line += sNotice.R(more + " · End 回到底部 bottom ")
+		line += t.th.Notice.R(more + " · End 回到底部 bottom ")
 	}
 	if pad := t.width - width(line); pad > 0 {
-		line += sDim.R(strings.Repeat("─", pad))
+		line += t.th.Dim.R(strings.Repeat("─", pad))
 	}
 	t.drawFixed(t.height-2, truncate(line, t.width, ""))
 }
 
 func (t *Term) footerLine() string {
 	keys := "Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Tab 补全 complete · Esc 清空 clear · Ctrl+C 退出 quit"
-	st := sOK.R("● 已连接 CONNECTED")
+	st := t.th.OK.R("● 已连接 CONNECTED")
 	for _, k := range []string{keys,
 		"Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 退出 quit",
 		"Enter 发送 send · PgUp/PgDn 滚动 · Ctrl+C 退出 quit",
@@ -456,7 +508,7 @@ func (t *Term) footerLine() string {
 		}
 	}
 	gap := max(1, t.width-width(keys)-width(st)-1)
-	return truncate(sDim.R(keys)+strings.Repeat(" ", gap)+st, t.width, "")
+	return truncate(t.th.Dim.R(keys)+strings.Repeat(" ", gap)+st, t.width, "")
 }
 
 // inputView returns the visible part of the input and the cursor column.
@@ -465,7 +517,7 @@ func (t *Term) inputView() (string, int) {
 	avail := max(4, t.width-width(prompt)-1)
 	if len(t.input) == 0 {
 		ph := truncate("说点什么… Type a message…  /help 帮助 help", avail, "")
-		return sPrompt.R(prompt) + sDim.R(ph), width(prompt) + 1
+		return t.th.Prompt.R(prompt) + t.th.Dim.R(ph), width(prompt) + 1
 	}
 	// choose a start so the cursor stays visible
 	start := 0
@@ -483,7 +535,7 @@ func (t *Term) inputView() (string, int) {
 		w += rw
 	}
 	col := width(prompt) + width(string(t.input[start:t.cursor])) + 1
-	return sPrompt.R(prompt) + b.String(), col
+	return t.th.Prompt.R(prompt) + b.String(), col
 }
 
 func (t *Term) drawInput() {
@@ -493,8 +545,10 @@ func (t *Term) drawInput() {
 	s, col := t.inputView()
 	t.curCol = col
 	t.moveTo(t.height-1, 1)
+	t.out.WriteString(t.th.Base)
 	t.out.WriteString(s)
-	t.out.WriteString("\x1b[0m\x1b[K")
+	t.out.WriteString(t.th.Base)
+	t.out.WriteString("\x1b[K")
 	t.placeCursor()
 }
 
@@ -653,7 +707,7 @@ func (t *Term) historyMove(d int) {
 	t.cursor = len(t.input)
 }
 
-var completions = []string{"/help", "/rooms", "/join ", "/create", "/leave", "/msg ", "/reply ", "/nick ", "/who", "/me ", "/ignore ", "/unignore ", "/report ", "/tz ", "/clear", "/quit"}
+var completions = []string{"/help", "/rooms", "/join ", "/create", "/leave", "/msg ", "/reply ", "/nick ", "/who", "/me ", "/ignore ", "/unignore ", "/report ", "/tz ", "/theme ", "/clear", "/quit"}
 
 // complete does command and nickname completion on the word before the cursor.
 func (t *Term) complete() {

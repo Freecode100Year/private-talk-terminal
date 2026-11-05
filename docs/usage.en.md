@@ -103,21 +103,24 @@ In the chat, `/help` lists the everyday commands and `/help all` lists everythin
 /report <nick> <why>   report to online moderators
 /bell on|off           bell on mentions and private messages
 /tz <zone>             show times in your timezone: /tz Europe/Berlin, /tz -5, /tz utc
+/theme black|white|green  background: black, white, eye-care green (no argument cycles)
 /privacy               what this server keeps and doesn't
 /forget                erase everything you posted from the room history
 /clear  /quit  /help
 //text                 send text that starts with /
 ```
 
-Keys: ↑↓ input history, PgUp/PgDn scroll the chat, Tab completes nicknames and commands, Esc clears the input and jumps to the bottom, Ctrl+A/E/U/W/K line editing, Ctrl+L redraw. Messages that mention you are highlighted. Pasting several lines joins them into one, so nothing is sent by accident.
+Keys: ↑↓ input history, PgUp/PgDn scroll the chat, Tab completes nicknames and commands, Esc clears the input and jumps to the bottom, Ctrl+A/E/U/W/K line editing, Ctrl+L redraw. Messages that mention you are shown as an orange band starting with `»`; `@nick` inside a message is bold and underlined. Pasting several lines joins them into one, so nothing is sent by accident.
 
 **Language:** every prompt, the help and the key hints are shown in both Simplified Chinese and English. Messages from other people are shown as written, not translated.
+
+**Background and colours (colour-blind and low-vision friendly):** type `/theme` to cycle between black, white and eye-care green backgrounds, or pick one with `/theme white`, `/theme green`, `/theme black`. To start with a light background, log in as `white@HOST` or `green@HOST` instead of the usual user name. On all three backgrounds body text is at least 7:1 contrast (WCAG AAA) and every other colour — timestamps, nicknames, hints — at least 4.5:1 (AA). Colours come from the colour-blind-safe Okabe–Ito family and never depend on telling red from green; important things carry a symbol as well as a colour: a `»` band means someone mentioned you, `!` an error, `▸` the current room. Only 256 colours are used, so old terminals and phone SSH apps look the same.
 
 **Bell:** when someone mentions you or sends you a private message, the terminal rings (phone SSH apps usually vibrate or notify). Don't want it? `/bell off`.
 
 **Join/leave lines in busy rooms:** once a room has more than 20 people, join/leave lines are replaced by one summary every 30 seconds, e.g. "3 joined, 2 left". Kicks and bans are still shown one by one.
 
-**Unread counts across rooms:** the rooms bar at the top shows how many new messages arrived in rooms you're not in, e.g. `#chinese 32 +5`. If someone mentioned you there, it shows a red `@5`, and a line `@ #chinese <Bob> …  · /join chinese` appears in your current room so you can jump over. Chinese nicknames are recognised even without a space after them (`@夜猫子你好`). The count resets when you enter that room. `/rooms` lists the counts too. Mentions inside private rooms don't notify anyone outside, so a room's existence doesn't leak.
+**Unread counts across rooms:** the rooms bar at the top shows how many new messages arrived in rooms you're not in, e.g. `#chinese 32 +5`. If someone mentioned you there, it shows an orange-highlighted `@5`, and a line `@ #chinese <Bob> …  · /join chinese` appears in your current room so you can jump over. Chinese nicknames are recognised even without a space after them (`@夜猫子你好`). The count resets when you enter that room. `/rooms` lists the counts too. Mentions inside private rooms don't notify anyone outside, so a room's existence doesn't leak.
 
 ## Connecting through Tor (the server never sees your IP)
 

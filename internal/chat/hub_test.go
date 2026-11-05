@@ -615,6 +615,32 @@ func TestBellToggle(t *testing.T) {
 	}
 }
 
+func TestThemeCommand(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("a", false)
+	if h.Status(a).Theme != ThemeDark {
+		t.Fatal("default theme should be dark")
+	}
+	for _, step := range []struct{ cmd, want string }{
+		{"/theme", ThemeLight}, {"/theme", ThemeGreen}, {"/theme", ThemeDark},
+		{"/theme 护眼", ThemeGreen}, {"/theme white", ThemeLight}, {"/bg black", ThemeDark},
+		{"/theme purple", ThemeDark},
+	} {
+		h.Handle(a, step.cmd)
+		if got := h.Status(a).Theme; got != step.want {
+			t.Fatalf("%s: theme %q, want %q", step.cmd, got, step.want)
+		}
+	}
+	h.SetTheme(a, "green")
+	if h.Status(a).Theme != ThemeGreen {
+		t.Fatal("SetTheme ignored")
+	}
+	h.SetTheme(a, "someuser")
+	if h.Status(a).Theme != ThemeGreen {
+		t.Fatal("SetTheme changed theme for an ordinary user name")
+	}
+}
+
 // Every server message reaches the client in both languages.
 func TestBilingual(t *testing.T) {
 	h := newTestHub()
@@ -623,7 +649,7 @@ func TestBilingual(t *testing.T) {
 	if len(evs) == 0 || !strings.Contains(evs[0].Text, "欢迎") || !strings.Contains(evs[0].En, "Welcome") {
 		t.Fatalf("welcome not bilingual: %+v", evs)
 	}
-	for _, cmd := range []string{"/help", "/help all", "/rooms", "/who", "/privacy", "/bell", "/tz", "/join nope", "/nick x", "/frobnicate", "/lang en"} {
+	for _, cmd := range []string{"/help", "/help all", "/rooms", "/who", "/privacy", "/bell", "/tz", "/theme", "/theme nope", "/join nope", "/nick x", "/frobnicate", "/lang en"} {
 		h.Handle(a, cmd)
 		for _, ev := range drain(a) {
 			if ev.Kind != KindChat && ev.Kind != KindAction && ev.En == "" {

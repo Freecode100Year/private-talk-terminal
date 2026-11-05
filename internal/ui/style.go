@@ -1,56 +1,158 @@
 package ui
 
 import (
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Freecode100Year/vivant/internal/chat"
 )
 
-// sgr is a precomputed "Select Graphic Rendition" prefix. Styling a string is
-// a concatenation — no allocation-heavy style engine on the hot path, which
-// matters when every message is rendered once per connected session.
-type sgr string
+// Colours are chosen for low vision and colour blindness:
+//
+//   - Every theme paints its own background, so contrast is known rather than
+//     guessed. Body text is at least 7:1 against it (WCAG AAA), and every other
+//     colour — nicknames, timestamps, hints, errors — at least 4.5:1 (AA).
+//     TestThemeContrast enforces this.
+//   - Nickname and status hues come from the Okabe–Ito colour-blind-safe
+//     family (orange, sky blue, bluish green, yellow, blue, vermillion,
+//     reddish purple). Nothing relies on telling red from green.
+//   - Meaning never rides on colour alone: a line that mentions you is a solid
+//     band with a "»" marker, @nick tags are underlined, errors start with "!",
+//     the current room with "▸", unread counts with "+" and "@".
+//
+// Only the xterm 256-colour palette is used (no 24-bit colour), so Windows
+// conhost, macOS Terminal.app, tmux and phone SSH apps all show the same thing.
 
-// R wraps s in the style and a reset.
-func (c sgr) R(s string) string {
-	if c == "" {
+// paint is a precomputed "Select Graphic Rendition" prefix plus the sequence
+// that returns to the theme's base colours. Styling a string is a
+// concatenation — no allocation-heavy style engine on the hot path, which
+// matters when every message is rendered once per connected session.
+type paint struct {
+	on, off string
+	fg, bg  int // xterm-256 indices; bg < 0 means the theme background
+}
+
+// R wraps s in the style, then returns to the theme's base colours.
+func (p paint) R(s string) string {
+	if p.on == "" {
 		return s
 	}
-	return string(c) + s + "\x1b[m"
+	return p.on + s + p.off
 }
 
-// Basic 16-colour palette (works on Windows conhost, old xterms, everything).
-func fg(n int) sgr {
-	if n < 8 {
-		return sgr("\x1b[" + itoa(30+n) + "m")
+// Theme is a complete colour scheme. Base sets the theme's foreground and
+// background; it is written wherever a plain reset would be, so the
+// background stays painted.
+type Theme struct {
+	Name   string
+	fg, bg int
+	Base   string
+
+	Header, HeaderDim paint // top bar
+	CurRoom, Prompt   paint
+	Self              paint // your own nickname
+	Mention           paint // a line that mentions you: solid band
+	Tag               paint // @nick inside a message
+	Dim               paint // timestamps, hints, English half, history
+	Info, Error       paint
+	Notice, DM, OK    paint
+	Nicks             []paint
+}
+
+func newTheme(name string, fg, bg int) *Theme {
+	return &Theme{Name: name, fg: fg, bg: bg,
+		Base: "\x1b[0;38;5;" + strconv.Itoa(fg) + ";48;5;" + strconv.Itoa(bg) + "m"}
+}
+
+// p builds a style: foreground fg, background bg (-1 = theme's), plus SGR
+// attributes such as "1" (bold) or "1;4" (bold underline).
+func (t *Theme) p(fg, bg int, attr string) paint {
+	on := "\x1b["
+	if attr != "" {
+		on += attr + ";"
 	}
-	return sgr("\x1b[" + itoa(90+n-8) + "m")
-}
-
-func itoa(n int) string {
-	if n < 10 {
-		return string(rune('0' + n))
+	on += "38;5;" + strconv.Itoa(fg)
+	if bg >= 0 {
+		on += ";48;5;" + strconv.Itoa(bg)
 	}
-	return itoa(n/10) + string(rune('0'+n%10))
+	return paint{on: on + "m", off: t.Base, fg: fg, bg: bg}
 }
 
-const (
-	sBold      sgr = "\x1b[1m"
-	sHeader    sgr = "\x1b[1;97;44m"
-	sHeaderDim sgr = "\x1b[37;44m"
-	sCurRoom   sgr = "\x1b[1;92m"
-	sPrompt    sgr = "\x1b[1;92m"
-	sSelf      sgr = "\x1b[1;97m"
-	sMention   sgr = "\x1b[1;93m"
-	sDim       sgr = "\x1b[90m"
-	sInfo      sgr = "\x1b[36m"
-	sError     sgr = "\x1b[91m"
-	sNotice    sgr = "\x1b[93m"
-	sDM        sgr = "\x1b[95m"
-	sOK        sgr = "\x1b[92m"
-)
+func (t *Theme) nicks(fgs ...int) {
+	for _, f := range fgs {
+		t.Nicks = append(t.Nicks, t.p(f, -1, ""))
+	}
+}
 
-var nickPalette = []sgr{fg(2), fg(3), fg(4), fg(5), fg(6), fg(12), fg(14), fg(10), fg(11), fg(13)}
+// Dark: light grey on black.
+var themeDark = func() *Theme {
+	t := newTheme(chat.ThemeDark, 254, 16)
+	t.Header = t.p(231, 24, "1")
+	t.HeaderDim = t.p(255, 24, "")
+	t.CurRoom = t.p(117, -1, "1")
+	t.Prompt = t.p(117, -1, "1")
+	t.Self = t.p(231, -1, "1")
+	t.Mention = t.p(16, 214, "1")
+	t.Tag = t.p(213, -1, "1;4")
+	t.Dim = t.p(247, -1, "")
+	t.Info = t.p(116, -1, "")
+	t.Error = t.p(210, -1, "1")
+	t.Notice = t.p(222, -1, "")
+	t.DM = t.p(183, -1, "1")
+	t.OK = t.p(117, -1, "")
+	//        orange sky  b-green yellow blue verm. purple teal  khaki lilac
+	t.nicks(215, 117, 79, 227, 111, 209, 176, 152, 186, 147)
+	return t
+}()
+
+// Light: near-black on white.
+var themeLight = func() *Theme {
+	t := newTheme(chat.ThemeLight, 234, 231)
+	lightCommon(t)
+	return t
+}()
+
+// Green: the "eye-care" pale green background (护眼绿), dark text.
+var themeGreen = func() *Theme {
+	t := newTheme(chat.ThemeGreen, 234, 194)
+	lightCommon(t)
+	return t
+}()
+
+// lightCommon fills in the styles shared by the two light backgrounds; the
+// colours are dark enough to pass on the (slightly darker) green as well.
+func lightCommon(t *Theme) {
+	t.Header = t.p(231, 24, "1")
+	t.HeaderDim = t.p(255, 24, "")
+	t.CurRoom = t.p(24, -1, "1")
+	t.Prompt = t.p(24, -1, "1")
+	t.Self = t.p(16, -1, "1")
+	t.Mention = t.p(16, 214, "1")
+	t.Tag = t.p(90, -1, "1;4")
+	t.Dim = t.p(239, -1, "")
+	t.Info = t.p(23, -1, "")
+	t.Error = t.p(124, -1, "1")
+	t.Notice = t.p(94, -1, "")
+	t.DM = t.p(54, -1, "1")
+	t.OK = t.p(24, -1, "")
+	//       brown blue  b-green olive navy  red  purple teal  plum  maroon
+	t.nicks(94, 25, 22, 58, 18, 124, 90, 23, 125, 88)
+}
+
+// Themes in /theme cycling order.
+var themes = []*Theme{themeDark, themeLight, themeGreen}
+
+// themeByName returns the named theme (dark for unknown names).
+func themeByName(name string) *Theme {
+	for _, t := range themes {
+		if t.Name == name {
+			return t
+		}
+	}
+	return themeDark
+}
 
 // width is the display width of s in terminal cells, ignoring escape
 // sequences. Pure ASCII (the common case) is counted without grapheme
