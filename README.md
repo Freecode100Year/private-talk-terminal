@@ -33,6 +33,8 @@ Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 
 - **iSH Shell**：App Store 免费下载，先运行 `apk add openssh-client`，再运行上面的命令。
 - **Termius**：新建主机，地址 `term.freedom8964.com`，端口 `2222`，用户名 `guest`，密码留空。
 
+**没有 SSH、只有浏览器**（或网络只放行 HTTPS）：打开部署者提供的网页入口即可聊天，和 SSH 用户在同一个房间，见[网页入口](docs/deploy.md#网页入口浏览器--websocket)。
+
 网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
 
 ## 常用命令
@@ -90,6 +92,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 - [x] **安全审计后的加固**：只用现代 SSH 算法、剔除隐形字符和标签字符（附模糊测试）、TCP 总连接上限、没有生效封禁时自动换封禁密钥
 - [x] **改名 VIVANT**：旧服务器运行一键安装命令自动迁移
 - [x] **离线一键安装**：一个自解压文件，`--to root@服务器` 从自己电脑直接部署；另附 Windows / macOS 程序供测试和局域网使用
+- [x] **网页入口**：`--web-port 8080` 开一个浏览器页面 + WebSocket（零第三方依赖、不用 Cookie），用 Cloudflare Tunnel 或 HTTPS 反代接出去；只能走 HTTPS 的网络和程序也能进来
 
 ## 文档
 

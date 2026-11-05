@@ -33,6 +33,8 @@ Every prompt, the help and the key hints are shown in both Simplified Chinese an
 - **iSH Shell**: free on the App Store. Run `apk add openssh-client` once, then the command above.
 - **Termius**: add a host with address `term.freedom8964.com`, port `2222`, username `guest`, password empty.
 
+**No SSH, only a browser** (or a network that only allows HTTPS): open the web entrance the operator provides; you end up in the same rooms as SSH users. See [Web entrance](docs/deploy.en.md#web-entrance-browser--websocket).
+
 If your network only lets port 443 through, use `-p 443` instead of `-p 2222` (the operator has to enable it). Any username works and there is no password. If the screen is too narrow or shows garbage, use the username `plain` for line mode. More ways to connect (Tor, scripts, skipping the fingerprint prompt): [Connecting and using](docs/usage.en.md).
 
 ## Everyday commands
@@ -90,6 +92,7 @@ Improvements chosen after studying similar projects (ssh-chat, devzat, SoftRoom,
 - [x] **Hardening after a security review**: modern SSH algorithms only, invisible and tag characters stripped (with a fuzz test), global TCP cap, fresh ban key when no ban is active
 - [x] **Renamed to VIVANT**: old servers migrate by running the installer
 - [x] **Offline one-click install**: one self-extracting file, `--to root@SERVER` deploys straight from your computer; plus Windows / macOS binaries for testing and LANs
+- [x] **Web entrance**: `--web-port 8080` serves a browser page + WebSocket (no third-party code, no cookies), published through Cloudflare Tunnel or an HTTPS proxy, for networks and programs that only speak HTTPS
 
 ## Documentation
 

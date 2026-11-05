@@ -65,11 +65,11 @@ sudo vivant-ctl uninstall --purge # 彻底删除
 
 ```bash
 # 方式一：在自己电脑上一条命令部署到服务器（Linux、macOS，或 Windows 的 Git Bash / WSL）
-bash vivant-v0.9.6-linux-offline.sh --to root@服务器
+bash vivant-v0.10.0-linux-offline.sh --to root@服务器
 
 # 方式二：先把文件传到服务器，再在服务器上运行
-scp vivant-v0.9.6-linux-offline.sh root@服务器:
-sudo bash vivant-v0.9.6-linux-offline.sh
+scp vivant-v0.10.0-linux-offline.sh root@服务器:
+sudo bash vivant-v0.10.0-linux-offline.sh
 ```
 
 后面可以跟和在线安装一样的参数，例如 `--to root@服务器 --port 2222 --admin-key ~/.ssh/id_ed25519.pub`（方式一里公钥文件路径指的是服务器上的路径，离线时请先把公钥传上去，或用方式二）。`--to` 用的是你电脑上的 ssh/scp，服务器上的用户不是 root 时会自动用 sudo。
@@ -98,6 +98,59 @@ VIVANT 以前叫 Private-Talk Terminal（程序名 `ptterm`）。已经部署了
 - 旧命令 `ptterm-ctl` 会保留为指向 `vivant-ctl` 的快捷方式。
 
 还没迁移的服务器执行 `sudo ptterm-ctl upgrade` 也能升级到新版本程序（继续沿用旧名字），之后随时再运行一键安装命令完成迁移。
+
+## 网页入口（浏览器 + WebSocket）
+
+给装不了 SSH、或网络只放行 HTTPS 的人（以及只能发 HTTPS 请求的程序、AI 助手）一条路。网页用户和 SSH 用户在同一个聊天室里，界面是纯文本模式，命令完全一样。
+
+```bash
+sudo vivant-ctl install --web-port 8080                     # 前面是 Cloudflare Tunnel（默认）
+sudo vivant-ctl install --web-port 8080 --web-proxy proxy   # 前面是 Caddy / nginx
+sudo vivant-ctl install --web-port off                      # 关闭
+```
+
+网页入口只监听 `127.0.0.1`，不开防火墙端口，必须用一个 HTTPS 前端把它接出去。**SSH 用的域名在 Cloudflare 上必须是灰云，所以网页入口要用另一个子域名**，例如 `chat.freedom8964.com`。
+
+**方式一：Cloudflare Tunnel（推荐，不用开端口、不用证书）**
+
+```bash
+# 在服务器上装好 cloudflared 并登录：cloudflared tunnel login
+cloudflared tunnel create vivant-web
+cloudflared tunnel route dns vivant-web chat.freedom8964.com
+cat > ~/.cloudflared/config.yml <<'CFG'
+tunnel: vivant-web
+credentials-file: /root/.cloudflared/<隧道ID>.json
+ingress:
+  - hostname: chat.freedom8964.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+CFG
+sudo cloudflared service install
+```
+
+**方式二：Caddy（自动申请证书）**，配合 `--web-proxy proxy`：
+
+```caddyfile
+chat.freedom8964.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+nginx 需要自己加 `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` 和 `X-Forwarded-For`。
+
+`--web-proxy` 决定从哪个请求头读真实地址（用于每地址限额和封禁，地址只会变成哈希，不记录）：`cloudflare` 读 `CF-Connecting-IP`，`proxy` 读 `X-Forwarded-For` 最后一项。选错会让所有网页用户共用一个限额，或让人伪造地址绕过限额。
+
+**隐私取舍，请告知用户：** 走网页时，HTTPS 在 Cloudflare 或你的反代上解密，它们能看到用户 IP 和聊天内容；浏览器靠 CA 证书而不是 SSH 主机指纹认服务器。追求匿名的人仍然推荐 SSH 或 Tor。页面本身不加载任何第三方资源、不设 Cookie、不用本地存储，并带严格的 CSP。
+
+**给程序用（`/ws` 协议）：** 连接 `wss://chat.example.com/ws`。服务器发来的每条文本消息是一段纯文本输出（用 `\n` 分行，偶尔有 `\a` 响铃）；客户端发出的每条文本消息就是一行输入（聊天内容或 `/命令`），和 SSH 里打字一样。带 `Origin` 头的浏览器请求只允许同源（`-web-origins` 可加白名单），不带 `Origin` 的脚本不受限制。Python 示例：
+
+```python
+import websocket                       # pip install websocket-client
+ws = websocket.create_connection("wss://chat.freedom8964.com/ws")
+ws.send("/nick bot")
+ws.send("大家好")
+print(ws.recv())
+```
 
 ## 连不上？先跑自检
 
@@ -159,6 +212,9 @@ sudo vivant-ctl status        # 输出里的 Host key: SHA256:…
 | `VIVANT_ONION_ADDR` / `-onion-addr` | — | 给 Tor 洋葱服务用的本地监听地址（`--tor` 自动设为 `127.0.0.1:2224`） |
 | `VIVANT_BAN_FILE` / `-ban-file` | — | 封禁持久化文件（`--persist-bans` 设为 `/var/lib/vivant/bans.json`） |
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | 额外监听地址，逗号分隔（`--alt-port 443` 设为 `:443`） |
+| `VIVANT_WEB_ADDR` / `-web-addr` | — | 网页入口监听地址（`--web-port 8080` 设为 `127.0.0.1:8080`），见[网页入口](#网页入口浏览器--websocket) |
+| `VIVANT_WEB_PROXY_HEADER` / `-web-proxy-header` | — | 从哪个请求头取真实地址（`--web-proxy` 设置）；直连时不要设 |
+| `VIVANT_WEB_ORIGINS` / `-web-origins` | — | 额外允许打开 `/ws` 的网页来源，逗号分隔 |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | 定期下载 Tor 出口节点列表，让 Tor 用户共用宽松限额；`off` 关闭 |
 | `-quiet-above` | 20 | 房间超过这个人数后，进出提示改为每 30 秒汇总一次（-1 = 不汇总） |
 | `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |

@@ -10,6 +10,7 @@
 | Line mode (old terminals, garbled CMD) | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
 | Behind a strict firewall (if the operator opened the alternate port) | `ssh -o StrictHostKeyChecking=accept-new -p 443 guest@HOST` |
 | No terminal / scripts / bots | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
+| Browser / HTTPS only (if the operator opened the web entrance) | open the web entrance, e.g. `https://chat.HOST`; programs can use `wss://chat.HOST/ws` (see [Web entrance](deploy.en.md#web-entrance-browser--websocket)) |
 | Through Tor (the server never sees your IP) | `torsocks ssh guest@<onion-address>.onion` (see below) |
 
 - Any username works (`admin` is reserved for admins), there is no password, and you land straight in the chat.

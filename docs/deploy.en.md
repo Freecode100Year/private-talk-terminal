@@ -65,11 +65,11 @@ Every release includes an offline one-click installer, `vivant-<version>-linux-o
 
 ```bash
 # Option 1: deploy to the server with one command from your computer (Linux, macOS, or Git Bash / WSL on Windows)
-bash vivant-v0.9.6-linux-offline.sh --to root@SERVER
+bash vivant-v0.10.0-linux-offline.sh --to root@SERVER
 
 # Option 2: copy the file to the server and run it there
-scp vivant-v0.9.6-linux-offline.sh root@SERVER:
-sudo bash vivant-v0.9.6-linux-offline.sh
+scp vivant-v0.10.0-linux-offline.sh root@SERVER:
+sudo bash vivant-v0.10.0-linux-offline.sh
 ```
 
 Add the same options as the online installer, e.g. `--to root@SERVER --port 2222 --admin-key ~/.ssh/id_ed25519.pub` (with option 1 a key file path refers to the server, so copy the key there first or use option 2). `--to` uses the ssh/scp on your computer; if the server user isn't root it uses sudo.
@@ -98,6 +98,59 @@ VIVANT used to be called Private-Talk Terminal (binary `ptterm`). On a server ru
 - The old `ptterm-ctl` command stays as a shortcut to `vivant-ctl`.
 
 Servers that haven't migrated can still run `sudo ptterm-ctl upgrade` to get the new program (under the old names) and run the install command to migrate whenever convenient. The binary also still accepts the old `PTT_*` environment variables.
+
+## Web entrance (browser + WebSocket)
+
+A way in for people who can't install SSH or whose network only allows HTTPS — and for programs and AI assistants that can only make HTTPS requests. Web users share the rooms with SSH users; they get the line-mode interface and the same commands.
+
+```bash
+sudo vivant-ctl install --web-port 8080                     # behind Cloudflare Tunnel (default)
+sudo vivant-ctl install --web-port 8080 --web-proxy proxy   # behind Caddy / nginx
+sudo vivant-ctl install --web-port off                      # turn it off
+```
+
+The web entrance only listens on `127.0.0.1` and opens no firewall port: publish it through an HTTPS front end. **The SSH hostname has to stay grey-cloud on Cloudflare, so use a separate subdomain for the web**, e.g. `chat.freedom8964.com`.
+
+**Option 1: Cloudflare Tunnel (recommended: no open port, no certificate)**
+
+```bash
+# install cloudflared on the server and log in: cloudflared tunnel login
+cloudflared tunnel create vivant-web
+cloudflared tunnel route dns vivant-web chat.freedom8964.com
+cat > ~/.cloudflared/config.yml <<'CFG'
+tunnel: vivant-web
+credentials-file: /root/.cloudflared/<tunnel-id>.json
+ingress:
+  - hostname: chat.freedom8964.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404
+CFG
+sudo cloudflared service install
+```
+
+**Option 2: Caddy (automatic certificates)**, with `--web-proxy proxy`:
+
+```caddyfile
+chat.freedom8964.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+With nginx, add `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` and `X-Forwarded-For` yourself.
+
+`--web-proxy` decides which header carries the real client address (used for per-address limits and bans, only ever as a hash, never logged): `cloudflare` reads `CF-Connecting-IP`, `proxy` reads the last entry of `X-Forwarded-For`. Choosing wrong either puts every web user in one shared quota or lets people forge addresses to dodge limits.
+
+**Privacy trade-off — tell your users:** on the web, HTTPS is decrypted at Cloudflare or your proxy, which can see users' IPs and messages, and browsers trust the server through CA certificates rather than an SSH host fingerprint. People who need anonymity should still use SSH or Tor. The page itself loads no third-party resources, sets no cookies, uses no browser storage and ships a strict CSP.
+
+**For programs (the `/ws` protocol):** connect to `wss://chat.example.com/ws`. Every text message from the server is a chunk of plain-text output (`\n`-separated lines, an occasional `\a` bell); every text message you send is one line of input (a chat message or a `/command`), exactly as typed over SSH. Browser requests carrying an `Origin` header must be same-origin (`-web-origins` adds exceptions); scripts that send no `Origin` are unaffected. Python example:
+
+```python
+import websocket                       # pip install websocket-client
+ws = websocket.create_connection("wss://chat.freedom8964.com/ws")
+ws.send("/nick bot")
+ws.send("hello everyone")
+print(ws.recv())
+```
 
 ## Can't connect? Run the self-check
 
@@ -159,6 +212,9 @@ Config file `/etc/vivant.env`; after editing run `systemctl restart vivant`:
 | `VIVANT_ONION_ADDR` / `-onion-addr` | — | local listener for the Tor onion service (`--tor` sets `127.0.0.1:2224`) |
 | `VIVANT_BAN_FILE` / `-ban-file` | — | ban persistence file (`--persist-bans` sets `/var/lib/vivant/bans.json`) |
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | extra listen addresses, comma separated (`--alt-port 443` sets `:443`) |
+| `VIVANT_WEB_ADDR` / `-web-addr` | — | web entrance listen address (`--web-port 8080` sets `127.0.0.1:8080`), see [Web entrance](#web-entrance-browser--websocket) |
+| `VIVANT_WEB_PROXY_HEADER` / `-web-proxy-header` | — | header carrying the real client address (set by `--web-proxy`); leave unset for direct connections |
+| `VIVANT_WEB_ORIGINS` / `-web-origins` | — | extra browser origins allowed to open `/ws`, comma separated |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | download Tor's exit list so Tor users share the generous limits; `off` disables |
 | `-quiet-above` | 20 | above this many people, join/leave lines become a summary every 30 s (-1 = never) |
 | `-history` / `-history-ttl` | 50 / 1h | messages kept per room, and for how long |
