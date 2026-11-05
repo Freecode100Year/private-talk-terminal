@@ -76,7 +76,7 @@ A 1-core, 1 GB VPS handles about 2000 people online at once. Installer options, 
 
 Improvements chosen after studying similar projects (ssh-chat, devzat, SoftRoom, sshoosh, SSHChat), done in order. Rule: nothing new for newcomers to learn, nothing that weakens anonymity.
 
-- [x] **Colour-blind and low-vision friendly colours**: `/theme` switches between black, white and eye-care green backgrounds, all meeting WCAG AA contrast (AAA for body text); messages mentioning you are an orange band, `@nick` is underlined
+- [x] **Colour-blind and low-vision friendly colours**: black text on eye-care green by default, `/theme` switches to black or white; every colour meets WCAG AAA (7:1+) on all three; messages mentioning you are an orange band, `@nick` is underlined
 - [x] **Bell on mentions and private messages**: on by default, `/bell off` to disable (from devzat)
 - [x] **Collapse join/leave lines in busy rooms**: "3 joined, 2 left" (from ssh-chat `/quiet`)
 - [x] **Alternate port 443**: `--alt-port 443` at install, for users behind strict firewalls (from devzat)

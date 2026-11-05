@@ -51,8 +51,8 @@ func contrast(a, b int) float64 {
 
 func TestThemeContrast(t *testing.T) {
 	for _, th := range themes {
-		if c := contrast(th.fg, th.bg); c < 7 {
-			t.Errorf("%s: body text %.2f:1, want >= 7 (AAA)", th.Name, c)
+		if c := contrast(th.fg, th.bg); c < 15 {
+			t.Errorf("%s: body text %.2f:1, want >= 15", th.Name, c)
 		}
 		styles := map[string]paint{
 			"Header": th.Header, "HeaderDim": th.HeaderDim, "CurRoom": th.CurRoom, "Prompt": th.Prompt,
@@ -67,8 +67,8 @@ func TestThemeContrast(t *testing.T) {
 			if bg < 0 {
 				bg = th.bg
 			}
-			if c := contrast(p.fg, bg); c < 4.5 {
-				t.Errorf("%s/%s: %.2f:1, want >= 4.5 (AA)", th.Name, name, c)
+			if c := contrast(p.fg, bg); c < 7 {
+				t.Errorf("%s/%s: %.2f:1, want >= 7 (AAA)", th.Name, name, c)
 			}
 			if p.off != th.Base {
 				t.Errorf("%s/%s does not return to the theme base", th.Name, name)
@@ -76,7 +76,7 @@ func TestThemeContrast(t *testing.T) {
 		}
 		// the mention band must stand out from the page by brightness too,
 		// not only by hue
-		if c := contrast(th.Mention.bg, th.bg); c < 1.6 {
+		if c := contrast(th.Mention.bg, th.bg); c < 2 {
 			t.Errorf("%s: mention band vs background %.2f:1, too close", th.Name, c)
 		}
 	}

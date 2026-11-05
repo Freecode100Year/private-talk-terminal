@@ -103,7 +103,7 @@ In the chat, `/help` lists the everyday commands and `/help all` lists everythin
 /report <nick> <why>   report to online moderators
 /bell on|off           bell on mentions and private messages
 /tz <zone>             show times in your timezone: /tz Europe/Berlin, /tz -5, /tz utc
-/theme black|white|green  background: black, white, eye-care green (no argument cycles)
+/theme green|black|white  background: eye-care green (default), black, white (no argument cycles)
 /privacy               what this server keeps and doesn't
 /forget                erase everything you posted from the room history
 /clear  /quit  /help
@@ -114,7 +114,9 @@ Keys: ↑↓ input history, PgUp/PgDn scroll the chat, Tab completes nicknames a
 
 **Language:** every prompt, the help and the key hints are shown in both Simplified Chinese and English. Messages from other people are shown as written, not translated.
 
-**Background and colours (colour-blind and low-vision friendly):** type `/theme` to cycle between black, white and eye-care green backgrounds, or pick one with `/theme white`, `/theme green`, `/theme black`. To start with a light background, log in as `white@HOST` or `green@HOST` instead of the usual user name. On all three backgrounds body text is at least 7:1 contrast (WCAG AAA) and every other colour — timestamps, nicknames, hints — at least 4.5:1 (AA). Colours come from the colour-blind-safe Okabe–Ito family and never depend on telling red from green; important things carry a symbol as well as a colour: a `»` band means someone mentioned you, `!` an error, `▸` the current room. Only 256 colours are used, so old terminals and phone SSH apps look the same.
+**Background and colours (colour-blind and low-vision friendly):** the default is black text on an eye-care green background. Type `/theme` to cycle between green, black and white backgrounds, or pick one with `/theme black`, `/theme white`, `/theme green`. To start with black or white, log in as `black@HOST` or `white@HOST` instead of the usual user name. On all three backgrounds every colour — body text, timestamps, nicknames, hints, errors — is at least 7:1 contrast (WCAG AAA); body text is 19:1 or more. Colours come from the colour-blind-safe Okabe–Ito family and never depend on telling red from green; important things carry a symbol as well as a colour: a `»` band means someone mentioned you, `!` an error, `▸` the current room. Only 256 colours are used, so old terminals and phone SSH apps look the same.
+
+**Font:** your own terminal picks the font; the server can't set it. For a clean sans-serif (黑体) that keeps Chinese and Latin aligned, try the free monospace Sarasa Mono SC. Windows Terminal: Settings → Profiles → Appearance → Font face → `Sarasa Mono SC`, and size 14–16 if you like it larger. macOS Terminal: Settings → Profiles → Text → Font. Phone SSH apps usually have it under Appearance or Terminal.
 
 **Bell:** when someone mentions you or sends you a private message, the terminal rings (phone SSH apps usually vibrate or notify). Don't want it? `/bell off`.
 

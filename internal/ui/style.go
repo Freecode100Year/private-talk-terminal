@@ -12,8 +12,8 @@ import (
 // Colours are chosen for low vision and colour blindness:
 //
 //   - Every theme paints its own background, so contrast is known rather than
-//     guessed. Body text is at least 7:1 against it (WCAG AAA), and every other
-//     colour — nicknames, timestamps, hints, errors — at least 4.5:1 (AA).
+//     guessed. Every colour — body text, nicknames, timestamps, hints, errors —
+//     is at least 7:1 against it (WCAG AAA); body text is 15:1 or more.
 //     TestThemeContrast enforces this.
 //   - Nickname and status hues come from the Okabe–Ito colour-blind-safe
 //     family (orange, sky blue, bluish green, yellow, blue, vermillion,
@@ -86,17 +86,17 @@ func (t *Theme) nicks(fgs ...int) {
 	}
 }
 
-// Dark: light grey on black.
+// Dark: white on black.
 var themeDark = func() *Theme {
-	t := newTheme(chat.ThemeDark, 254, 16)
-	t.Header = t.p(231, 24, "1")
-	t.HeaderDim = t.p(255, 24, "")
+	t := newTheme(chat.ThemeDark, 231, 16)
+	t.Header = t.p(231, 18, "1")
+	t.HeaderDim = t.p(255, 18, "")
 	t.CurRoom = t.p(117, -1, "1")
 	t.Prompt = t.p(117, -1, "1")
 	t.Self = t.p(231, -1, "1")
-	t.Mention = t.p(16, 214, "1")
+	t.Mention = t.p(16, 208, "1")
 	t.Tag = t.p(213, -1, "1;4")
-	t.Dim = t.p(247, -1, "")
+	t.Dim = t.p(250, -1, "")
 	t.Info = t.p(116, -1, "")
 	t.Error = t.p(210, -1, "1")
 	t.Notice = t.p(222, -1, "")
@@ -107,16 +107,16 @@ var themeDark = func() *Theme {
 	return t
 }()
 
-// Light: near-black on white.
+// Light: black on white.
 var themeLight = func() *Theme {
-	t := newTheme(chat.ThemeLight, 234, 231)
+	t := newTheme(chat.ThemeLight, 16, 231)
 	lightCommon(t)
 	return t
 }()
 
-// Green: the "eye-care" pale green background (护眼绿), dark text.
+// Green: the "eye-care" pale green background (护眼绿), black text. Default.
 var themeGreen = func() *Theme {
-	t := newTheme(chat.ThemeGreen, 234, 194)
+	t := newTheme(chat.ThemeGreen, 16, 194)
 	lightCommon(t)
 	return t
 }()
@@ -124,34 +124,35 @@ var themeGreen = func() *Theme {
 // lightCommon fills in the styles shared by the two light backgrounds; the
 // colours are dark enough to pass on the (slightly darker) green as well.
 func lightCommon(t *Theme) {
-	t.Header = t.p(231, 24, "1")
-	t.HeaderDim = t.p(255, 24, "")
-	t.CurRoom = t.p(24, -1, "1")
-	t.Prompt = t.p(24, -1, "1")
+	t.Header = t.p(231, 18, "1")
+	t.HeaderDim = t.p(255, 18, "")
+	t.CurRoom = t.p(19, -1, "1")
+	t.Prompt = t.p(19, -1, "1")
 	t.Self = t.p(16, -1, "1")
-	t.Mention = t.p(16, 214, "1")
+	t.Mention = t.p(16, 208, "1")
 	t.Tag = t.p(90, -1, "1;4")
-	t.Dim = t.p(239, -1, "")
-	t.Info = t.p(23, -1, "")
-	t.Error = t.p(124, -1, "1")
-	t.Notice = t.p(94, -1, "")
-	t.DM = t.p(54, -1, "1")
-	t.OK = t.p(24, -1, "")
-	//       brown blue  b-green olive navy  red  purple teal  plum  maroon
-	t.nicks(94, 25, 22, 58, 18, 124, 90, 23, 125, 88)
+	t.Dim = t.p(238, -1, "")
+	t.Info = t.p(22, -1, "")
+	t.Error = t.p(88, -1, "1")
+	t.Notice = t.p(52, -1, "1")
+	t.DM = t.p(55, -1, "1")
+	t.OK = t.p(19, -1, "")
+	// Only dark shades reach 7:1 on a light page.
+	//       navy red green purple maroon blue violet wine indigo grape
+	t.nicks(18, 88, 22, 90, 52, 20, 54, 89, 55, 56)
 }
 
-// Themes in /theme cycling order.
-var themes = []*Theme{themeDark, themeLight, themeGreen}
+// Themes in /theme cycling order, the default first.
+var themes = []*Theme{themeGreen, themeDark, themeLight}
 
-// themeByName returns the named theme (dark for unknown names).
+// themeByName returns the named theme (the default for unknown names).
 func themeByName(name string) *Theme {
 	for _, t := range themes {
 		if t.Name == name {
 			return t
 		}
 	}
-	return themeDark
+	return themeGreen
 }
 
 // width is the display width of s in terminal cells, ignoring escape

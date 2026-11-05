@@ -65,11 +65,11 @@ Every release includes an offline one-click installer, `vivant-<version>-linux-o
 
 ```bash
 # Option 1: deploy to the server with one command from your computer (Linux, macOS, or Git Bash / WSL on Windows)
-bash vivant-v0.9.4-linux-offline.sh --to root@SERVER
+bash vivant-v0.9.5-linux-offline.sh --to root@SERVER
 
 # Option 2: copy the file to the server and run it there
-scp vivant-v0.9.4-linux-offline.sh root@SERVER:
-sudo bash vivant-v0.9.4-linux-offline.sh
+scp vivant-v0.9.5-linux-offline.sh root@SERVER:
+sudo bash vivant-v0.9.5-linux-offline.sh
 ```
 
 Add the same options as the online installer, e.g. `--to root@SERVER --port 2222 --admin-key ~/.ssh/id_ed25519.pub` (with option 1 a key file path refers to the server, so copy the key there first or use option 2). `--to` uses the ssh/scp on your computer; if the server user isn't root it uses sudo.

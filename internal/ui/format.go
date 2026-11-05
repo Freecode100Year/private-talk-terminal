@@ -25,12 +25,12 @@ type Formatter struct {
 	Styled bool
 	Self   func() string         // current nickname of the viewer
 	Loc    func() *time.Location // viewer's timezone (nil = server local)
-	Theme  *Theme                // colours (nil = dark)
+	Theme  *Theme                // colours (nil = default, green)
 }
 
 func (f Formatter) th() *Theme {
 	if f.Theme == nil {
-		return themeDark
+		return themeGreen
 	}
 	return f.Theme
 }

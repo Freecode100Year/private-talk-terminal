@@ -618,12 +618,12 @@ func TestBellToggle(t *testing.T) {
 func TestThemeCommand(t *testing.T) {
 	h := newTestHub()
 	a, _ := h.Connect("a", false)
-	if h.Status(a).Theme != ThemeDark {
-		t.Fatal("default theme should be dark")
+	if h.Status(a).Theme != ThemeGreen {
+		t.Fatal("default theme should be green")
 	}
 	for _, step := range []struct{ cmd, want string }{
-		{"/theme", ThemeLight}, {"/theme", ThemeGreen}, {"/theme", ThemeDark},
-		{"/theme 护眼", ThemeGreen}, {"/theme white", ThemeLight}, {"/bg black", ThemeDark},
+		{"/theme", ThemeDark}, {"/theme", ThemeLight}, {"/theme", ThemeGreen},
+		{"/theme black", ThemeDark}, {"/theme 护眼", ThemeGreen}, {"/theme white", ThemeLight}, {"/bg black", ThemeDark},
 		{"/theme purple", ThemeDark},
 	} {
 		h.Handle(a, step.cmd)
@@ -631,12 +631,12 @@ func TestThemeCommand(t *testing.T) {
 			t.Fatalf("%s: theme %q, want %q", step.cmd, got, step.want)
 		}
 	}
-	h.SetTheme(a, "green")
-	if h.Status(a).Theme != ThemeGreen {
+	h.SetTheme(a, "white")
+	if h.Status(a).Theme != ThemeLight {
 		t.Fatal("SetTheme ignored")
 	}
 	h.SetTheme(a, "someuser")
-	if h.Status(a).Theme != ThemeGreen {
+	if h.Status(a).Theme != ThemeLight {
 		t.Fatal("SetTheme changed theme for an ordinary user name")
 	}
 }
