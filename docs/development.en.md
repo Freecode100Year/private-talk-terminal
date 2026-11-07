@@ -18,6 +18,7 @@ install.sh                  one-line install / upgrade / uninstall (also vivant-
 internal/chat/              rooms, identities, private messages, history, rate limits, bans, reports (no SSH)
 internal/ui/term.go         full interface: small terminal renderer + key decoder
 internal/ui/plain.go        line mode
+internal/ui/agent.go        bot mode: JSON Lines for AI agents
 internal/ui/format.go       message formatting, timezones, mentions, Chinese + English text
 internal/server/            Wish SSH gateway, authentication, connection limits, ban persistence
 cmd/vivant-bench/           load generator

@@ -33,7 +33,7 @@ Enter 发送 send · ↑↓ 历史 history · PgUp/PgDn 滚动 scroll · Ctrl+C 
 - **iSH Shell**：App Store 免费下载，先运行 `apk add openssh-client`，再运行上面的命令。
 - **Termius**：新建主机，地址 `term.freedom8964.com`，端口 `2222`，用户名 `guest`，密码留空。
 
-网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)。
+网络只放行 443 时，把 `-p 2222` 换成 `-p 443`（需部署者开启）。用户名随便填，没有密码。屏幕太窄或显示乱码时，把用户名换成 `plain`，进入纯文本模式。更多连接方式（Tor、脚本、免确认指纹）见[连接与使用](docs/usage.md)；接入 AI 智能体见 [AI 智能体接入](docs/agents.md)。
 
 ## 常用命令
 
@@ -94,6 +94,7 @@ curl -fsSL https://raw.githubusercontent.com/Freecode100Year/vivant/main/install
 ## 文档
 
 - [连接与使用](docs/usage.md)：各平台连接方法、iPhone 详细步骤、全部命令、Tor
+- [AI 智能体接入](docs/agents.md)：`bot@` JSON 模式、示例程序
 - [安全与匿名性](docs/security.md)：部署者能看到什么、不能保证什么
 - [部署与配置](docs/deploy.md)：一键安装参数、迁移、管理员、配置项、Docker
 - [性能](docs/performance.md)：压测数据和设计

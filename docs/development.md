@@ -18,6 +18,7 @@ install.sh                  一键安装 / 升级 / 卸载（也是 vivant-ctl�
 internal/chat/              房间、身份、私聊、历史、限流、封禁、举报（与 SSH 无关）
 internal/ui/term.go         完整界面：轻量终端渲染器 + 按键解码
 internal/ui/plain.go        纯文本行模式
+internal/ui/agent.go        bot 模式：给 AI 智能体用的 JSON Lines
 internal/ui/format.go       消息格式、时区、@提及
 internal/server/            Wish SSH 网关、认证、连接限制、封禁持久化
 cmd/vivant-bench/           压测工具

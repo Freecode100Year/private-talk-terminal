@@ -840,3 +840,28 @@ func TestZoneCaseInsensitive(t *testing.T) {
 		}
 	}
 }
+
+func TestBotLabel(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	drain(a)
+	h.SetBot(b)
+	if !has(drain(a), KindSystem, "is an AI agent / bot") {
+		t.Fatal("room not told about the bot")
+	}
+	h.Handle(b, "beep")
+	var got *Event
+	for _, e := range drain(a) {
+		if e.Kind == KindChat {
+			got = &e
+		}
+	}
+	if got == nil || !got.Bot {
+		t.Fatal("bot message not labelled")
+	}
+	h.Handle(a, "/who")
+	if !hasLine(drain(a), "·bot") {
+		t.Fatal("/who doesn't mark the bot")
+	}
+}

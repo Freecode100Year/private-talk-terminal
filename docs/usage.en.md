@@ -9,7 +9,8 @@
 | Full interface (recommended) | `ssh -o StrictHostKeyChecking=accept-new -p 2222 guest@HOST` |
 | Line mode (old terminals, garbled CMD) | `ssh -o StrictHostKeyChecking=accept-new -p 2222 plain@HOST` |
 | Behind a strict firewall (if the operator opened the alternate port) | `ssh -o StrictHostKeyChecking=accept-new -p 443 guest@HOST` |
-| No terminal / scripts / bots | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
+| No terminal / scripts | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 guest@HOST` |
+| AI agents / bots (JSON) | `ssh -o StrictHostKeyChecking=accept-new -T -p 2222 bot@HOST` — see [AI agents](agents.en.md) |
 | Through Tor (the server never sees your IP) | `torsocks ssh guest@<onion-address>.onion` (see below) |
 
 - Any username works (`admin` is reserved for admins), there is no password, and you land straight in the chat.

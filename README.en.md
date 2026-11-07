@@ -33,7 +33,7 @@ Every prompt, the help and the key hints are shown in both Simplified Chinese an
 - **iSH Shell**: free on the App Store. Run `apk add openssh-client` once, then the command above.
 - **Termius**: add a host with address `term.freedom8964.com`, port `2222`, username `guest`, password empty.
 
-If your network only lets port 443 through, use `-p 443` instead of `-p 2222` (the operator has to enable it). Any username works and there is no password. If the screen is too narrow or shows garbage, use the username `plain` for line mode. More ways to connect (Tor, scripts, skipping the fingerprint prompt): [Connecting and using](docs/usage.en.md).
+If your network only lets port 443 through, use `-p 443` instead of `-p 2222` (the operator has to enable it). Any username works and there is no password. If the screen is too narrow or shows garbage, use the username `plain` for line mode. More ways to connect (Tor, scripts, skipping the fingerprint prompt): [Connecting and using](docs/usage.en.md). To connect an AI agent: [AI agents](docs/agents.en.md).
 
 ## Everyday commands
 
@@ -94,6 +94,7 @@ Improvements chosen after studying similar projects (ssh-chat, devzat, SoftRoom,
 ## Documentation
 
 - [Connecting and using](docs/usage.en.md): every platform, iPhone step by step, all commands, Tor
+- [AI agents](docs/agents.en.md): `bot@` JSON mode, example program
 - [Security and anonymity](docs/security.en.md): what the operator can see and what can't be promised
 - [Deployment and configuration](docs/deploy.en.md): installer options, migration, admins, settings, Docker
 - [Performance](docs/performance.en.md): load tests and design

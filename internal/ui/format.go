@@ -176,16 +176,21 @@ func (f Formatter) lines(ev chat.Event) []string {
 			text = highlightTags(text, th.Tag)
 		}
 	}
+	// AI agents are labelled, so people know when they're talking to one.
+	botTag, botMark := "", ""
+	if ev.Bot {
+		botTag, botMark = f.st(th.Dim, "·bot"), "·bot"
+	}
 	var head string
 	switch ev.Kind {
 	case chat.KindChat:
-		head = ts + "<" + nick(ev.From) + "> " + text
+		head = ts + "<" + nick(ev.From) + botTag + "> " + text
 	case chat.KindAction:
-		head = ts + "* " + nick(ev.From) + " " + text
+		head = ts + "* " + nick(ev.From) + botTag + " " + text
 	case chat.KindSystem:
 		head = ts + f.st(th.Dim, "-- "+ev.Text)
 	case chat.KindDMIn:
-		head = ts + f.st(th.DM, "[私信 DM ← "+ev.From+"] ") + ev.Text
+		head = ts + f.st(th.DM, "[私信 DM ← "+ev.From+botMark+"] ") + ev.Text
 	case chat.KindDMOut:
 		head = ts + f.st(th.DM, "[私信 DM → "+ev.To+"] ") + ev.Text
 	case chat.KindInfo:
@@ -193,7 +198,7 @@ func (f Formatter) lines(ev chat.Event) []string {
 	case chat.KindError:
 		head = ts + f.st(th.Error, "! "+ev.Text)
 	case chat.KindMention:
-		head = ts + f.st(th.Mention, "@ #"+ev.Room+" <"+ev.From+"> ") + " " + ev.Text + f.st(th.Dim, "  · /join "+ev.Room)
+		head = ts + f.st(th.Mention, "@ #"+ev.Room+" <"+ev.From+botMark+"> ") + " " + ev.Text + f.st(th.Dim, "  · /join "+ev.Room)
 	case chat.KindNotice:
 		from := "系统 System"
 		if ev.From != "" {

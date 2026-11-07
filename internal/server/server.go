@@ -421,6 +421,13 @@ func clientFrom(sess ssh.Session) *chat.Client {
 	return c
 }
 
+// isAgentUser: `ssh -T bot@host` (or json@) is the JSON Lines mode for AI
+// agents and scripts.
+func isAgentUser(user string) bool {
+	u := strings.ToLower(user)
+	return u == "bot" || u == "json" || u == "agent"
+}
+
 // wantsPlain decides between the TUI and line mode.
 func wantsPlain(sess ssh.Session) (plain bool, hasPty bool, width int) {
 	pty, _, ok := sess.Pty()
@@ -439,6 +446,11 @@ func (s *Server) uiHandler(next ssh.Handler) ssh.Handler {
 	return func(sess ssh.Session) {
 		c := clientFrom(sess)
 		if c == nil {
+			return
+		}
+		if isAgentUser(sess.User()) {
+			ui.Agent(sess, s.hub, c)
+			_ = sess.Exit(0)
 			return
 		}
 		plain, hasPty, width := wantsPlain(sess)

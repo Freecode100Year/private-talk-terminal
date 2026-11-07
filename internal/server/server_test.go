@@ -460,3 +460,47 @@ func TestGlobalTCPCap(t *testing.T) {
 		h.Close()
 	}
 }
+
+func dialAs(t *testing.T, addr, user string) *gossh.Client {
+	t.Helper()
+	c, err := gossh.Dial("tcp", addr, &gossh.ClientConfig{
+		User:            user,
+		Auth:            []gossh.AuthMethod{gossh.KeyboardInteractive(func(string, string, []string, []bool) ([]string, error) { return nil, nil })},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+// Bot mode end to end: JSON in, JSON out, the bot is labelled for humans,
+// and a long multi-line reply arrives as several paced messages.
+func TestAgentMode(t *testing.T) {
+	addr := startServer(t)
+	inH, outH := plainSession(t, dial(t, addr))
+	waitFor(t, outH, "已进入 #general")
+	io.WriteString(inH, "/nick Human\n")
+
+	inB, outB := plainSession(t, dialAs(t, addr, "bot"))
+	waitFor(t, outB, `"type":"hello"`)
+	waitFor(t, outH, "is an AI agent / bot")
+	io.WriteString(inB, `{"cmd":"/nick Helper"}`+"\n")
+	waitFor(t, outB, "Helper")
+
+	io.WriteString(inH, "hi @Helper\n")
+	waitFor(t, outB, `"mention":true`)
+
+	long := strings.Repeat("word ", 150) // 750 runes: two messages
+	io.WriteString(inB, `{"text":"first line\n`+long+`"}`+"\n")
+	waitFor(t, outH, "<Helper·bot> first line")
+	waitFor(t, outH, "<Helper·bot> word word")
+	waitFor(t, outH, "<Helper·bot> word word")
+
+	io.WriteString(inB, `{"type":"ping"}`+"\n")
+	waitFor(t, outB, `"type":"pong"`)
+	io.WriteString(inB, `{"nope":1}`+"\n")
+	waitFor(t, outB, `"type":"error"`)
+}
