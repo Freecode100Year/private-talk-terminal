@@ -5,3 +5,4 @@ go.work
 go.work.sum
 *.pem
 host_ed25519*
+__pycache__/
