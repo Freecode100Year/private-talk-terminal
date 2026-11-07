@@ -534,7 +534,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 	}
-	s.hub.Shutdown("Server is restarting — please reconnect in a moment. 服务器重启中，请稍后重连。")
+	s.hub.Shutdown("Server is restarting — please reconnect in a moment.")
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.Shutdown(sctx); err != nil && !errors.Is(err, ssh.ErrServerClosed) {

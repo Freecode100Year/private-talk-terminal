@@ -96,7 +96,9 @@ jobs:
 
           程序 Binaries: `vivant-linux-amd64` (x86_64), `vivant-linux-arm64` (ARM64, e.g. Oracle Ampere), `vivant-linux-armv7`；用 `SHA256SUMS` 校验 · verify with `SHA256SUMS`. (`ptterm-linux-*` are the same files under the old names.)
           EOF
-          gh release create "$V" dist/* --target "$GITHUB_SHA" --title "$V" --notes-file notes.md --generate-notes
+          # --latest: a release from main is always the current one, even when an
+          # abandoned tag (v0.10.0) has a higher version number.
+          gh release create "$V" dist/* --target "$GITHUB_SHA" --title "$V" --notes-file notes.md --generate-notes --latest
 
       - uses: docker/setup-buildx-action@v3
         if: steps.v.outputs.skip != 'true'

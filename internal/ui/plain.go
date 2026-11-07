@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -40,6 +41,10 @@ func Plain(rw io.ReadWriter, hub *chat.Hub, c *chat.Client, hasPty bool, width i
 	for {
 		select {
 		case ev := <-c.Out:
+			if ev.Kind == chat.KindHistory {
+				p.printHistory(ev.Batch)
+				continue
+			}
 			p.printEvent(*ev)
 			if Rings(ev, hub.Nick(c)) && hub.BellOn(c) && time.Since(p.rang) > 2*time.Second {
 				p.write("\a")
@@ -116,6 +121,21 @@ func (p *plain) printEvent(ev chat.Event) {
 		p.write(l + p.nl)
 	}
 	p.drawPromptLocked()
+}
+
+// plainReplay is how much of a room's history line mode prints on join:
+// enough for context without flooding a phone screen (or a bot) with a day
+// of chat.
+const plainReplay = 50
+
+func (p *plain) printHistory(batch []*chat.Event) {
+	if n := len(batch) - plainReplay; n > 0 {
+		p.printRaw(fmt.Sprintf("（省略更早的 %d 条 · %d earlier messages not shown）", n, n))
+		batch = batch[n:]
+	}
+	for _, ev := range batch {
+		p.printEvent(*ev)
+	}
 }
 
 func (p *plain) readInput(r io.Reader, lines chan<- string, quit chan<- struct{}, stop <-chan struct{}) {

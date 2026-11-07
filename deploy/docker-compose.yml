@@ -15,7 +15,7 @@ services:
       VIVANT_ADDR: ":2222"
       GOMEMLIMIT: "600MiB"
       # VIVANT_ROOMS: "general:大厅,english:English"
-    command: ["-history", "50", "-history-ttl", "1h", "-max-per-ip", "3", "-idle-timeout", "1h"]
+    command: ["-max-per-ip", "3", "-idle-timeout", "1h"]
     volumes:
       - vivant-data:/data
     logging:

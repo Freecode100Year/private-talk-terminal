@@ -275,6 +275,10 @@ func activeStyle(s, base string) string {
 // addEvent appends and draws an event; it reports whether the event may have
 // changed the status rows (joins, nick changes, room switches, ...).
 func (t *Term) addEvent(ev *chat.Event) (statusStale bool) {
+	if ev.Kind == chat.KindHistory {
+		t.addHistory(ev.Batch)
+		return true
+	}
 	switch ev.Kind {
 	case chat.KindChat, chat.KindAction, chat.KindDMIn, chat.KindDMOut:
 	default:
@@ -306,6 +310,28 @@ func (t *Term) addEvent(ev *chat.Event) (statusStale bool) {
 	}
 	t.placeCursor()
 	return statusStale
+}
+
+// addHistory appends a replayed room history and redraws the chat area once,
+// instead of scrolling every old line in separately.
+func (t *Term) addHistory(batch []*chat.Event) {
+	if len(batch) == 0 {
+		return
+	}
+	if len(batch) > maxEvents {
+		batch = batch[len(batch)-maxEvents:]
+	}
+	t.events = append(t.events, batch...)
+	if len(t.events) > maxEvents+maxEvents/4 {
+		t.events = append(t.events[:0:0], t.events[len(t.events)-maxEvents:]...)
+	}
+	if t.tooSmall() {
+		return
+	}
+	t.scroll, t.unseen = 0, 0
+	t.drawChat()
+	t.drawSeparator()
+	t.placeCursor()
 }
 
 // window renders the lines visible with the current scroll offset, walking

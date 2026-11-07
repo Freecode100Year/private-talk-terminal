@@ -68,3 +68,15 @@ func TestFormatterBilingual(t *testing.T) {
 		t.Fatalf("long pair layout %q", l)
 	}
 }
+
+func TestHistoryFromAnotherDayShowsDate(t *testing.T) {
+	f := Formatter{}
+	old := chat.Event{Kind: chat.KindChat, From: "a", Text: "x", Time: time.Now().Add(-25 * time.Hour), History: true}
+	if l := f.Lines(old)[0]; !strings.Contains(l, old.Time.Format("01-02 15:04")) {
+		t.Fatalf("no date on old history: %q", l)
+	}
+	now := chat.Event{Kind: chat.KindChat, From: "a", Text: "x", Time: time.Now()}
+	if l := f.Lines(now)[0]; strings.Contains(l, now.Time.Format("01-02")) {
+		t.Fatalf("date on a live line: %q", l)
+	}
+}

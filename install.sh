@@ -414,12 +414,20 @@ GOMEMLIMIT=$(mem_limit)
 #VIVANT_MOTD=/etc/vivant/motd.txt
 
 # 其他参数 · Any other flags.
-VIVANT_ARGS=-history 50 -history-ttl 1h -max-per-ip 3 -idle-timeout 1h
+# 聊天记录默认只在内存保留 24 小时、每房间 500 条（-history / -history-ttl 可改）。
+# Chat history: memory only, 24 hours, 500 per room by default (-history / -history-ttl).
+VIVANT_ARGS=-max-per-ip 3 -idle-timeout 1h
 EOF
 		chmod 0644 "$ENV_FILE"
 		ok "已创建 Created $ENV_FILE"
 	elif [ -n "$PORT" ]; then
 		set_env VIVANT_ADDR ":$PORT"
+	fi
+	# Upgrades: the old built-in 1-hour history setting gives way to the new
+	# 24-hour default. Values someone chose themselves are left alone.
+	if grep -q '^VIVANT_ARGS=.*-history 50 -history-ttl 1h' "$ENV_FILE" 2>/dev/null; then
+		sed -i '/^VIVANT_ARGS=/s/-history 50 -history-ttl 1h *//' "$ENV_FILE"
+		ok "聊天记录改为保留 24 小时 · Chat history now kept for 24 hours"
 	fi
 	[ -n "$ROOMS" ] && set_env VIVANT_ROOMS "$ROOMS"
 	# not read by vivant; lets "vivant-ctl doctor" check DNS for this name

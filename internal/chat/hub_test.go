@@ -12,6 +12,12 @@ func drain(c *Client) []Event {
 	for {
 		select {
 		case ev := <-c.Out:
+			if ev.Kind == KindHistory { // a replay arrives as one event
+				for _, e := range ev.Batch {
+					out = append(out, *e)
+				}
+				continue
+			}
 			out = append(out, *ev)
 		default:
 			return out
@@ -537,7 +543,7 @@ func TestPrivacyReflectsConfig(t *testing.T) {
 		t.Fatalf("got %d events", len(evs))
 	}
 	all := strings.Join(evs[0].Lines, "\n")
-	for _, want := range []string{"最多 20 条", "30m0s", "已开启持久化", ".onion", "不写入日志", "能看到连接来源 IP"} {
+	for _, want := range []string{"最多 20 条", "30 分钟", "已开启持久化", ".onion", "不写入日志", "能看到连接来源 IP"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("/privacy missing %q:\n%s", want, all)
 		}
@@ -728,5 +734,109 @@ func TestRandomCode(t *testing.T) {
 			t.Fatalf("bad code %q", c)
 		}
 		seen[c] = true
+	}
+}
+
+func TestDefaultHistoryKeepsADay(t *testing.T) {
+	h := NewHub(Config{})
+	if h.cfg.HistoryTTL != 24*time.Hour || h.cfg.HistorySize != 500 {
+		t.Fatalf("defaults: ttl %s size %d", h.cfg.HistoryTTL, h.cfg.HistorySize)
+	}
+	a, _ := h.Connect("ip-a", false)
+	drain(a)
+	h.Handle(a, "/privacy")
+	if !has(drain(a), KindInfo, "本服务器") {
+		t.Fatal("no privacy reply")
+	}
+	h.mu.Lock()
+	h.rooms[h.public[0]].history = []Event{{Time: time.Now().Add(-23 * time.Hour), Kind: KindChat, Text: "yesterday"}}
+	h.mu.Unlock()
+	h.Janitor()
+	b, _ := h.Connect("ip-b", false)
+	if !has(drain(b), KindChat, "yesterday") {
+		t.Fatal("23h-old message was not kept")
+	}
+	h.mu.Lock()
+	h.rooms[h.public[0]].history[0].Time = time.Now().Add(-25 * time.Hour)
+	h.mu.Unlock()
+	h.Janitor()
+	c, _ := h.Connect("ip-c", false)
+	if has(drain(c), KindChat, "yesterday") {
+		t.Fatal("25h-old message was kept")
+	}
+}
+
+// A long history must reach the newcomer in full, along with the join
+// notice after it, even though the client channel holds only 128 events.
+func TestLongHistoryReplayNotDropped(t *testing.T) {
+	h := NewHub(Config{MsgBurst: 1e6, MsgPerSecond: 1e6})
+	a, _ := h.Connect("ip-a", false)
+	for i := range 400 {
+		h.Handle(a, fmt.Sprintf("msg %d", i))
+	}
+	b, _ := h.Connect("ip-b", false)
+	evs := drain(b)
+	n := 0
+	for _, e := range evs {
+		if e.History && e.Kind == KindChat {
+			n++
+		}
+	}
+	if n != 400 {
+		t.Fatalf("replayed %d of 400", n)
+	}
+	if !has(evs, KindInfo, "Now in #general") {
+		t.Fatal("join notice lost after the replay")
+	}
+}
+
+func TestHistoryCaps(t *testing.T) {
+	h := NewHub(Config{HistorySize: 40, MsgBurst: 1e6, MsgPerSecond: 1e6})
+	a, _ := h.Connect("ip-a", false)
+	for i := range 100 {
+		h.Handle(a, fmt.Sprintf("public %d", i))
+	}
+	b, _ := h.Connect("ip-b", false)
+	n := 0
+	for _, e := range drain(b) {
+		if e.History {
+			n++
+		}
+	}
+	if n != 40 {
+		t.Fatalf("public room replayed %d, want 40", n)
+	}
+	if h.cfg.PrivateHistorySize != 40 {
+		t.Fatalf("private cap %d, want min(size, 100) = 40", h.cfg.PrivateHistorySize)
+	}
+}
+
+func TestReplaySkipsIgnored(t *testing.T) {
+	h := newTestHub()
+	a, _ := h.Connect("ip-a", false)
+	b, _ := h.Connect("ip-b", false)
+	h.Handle(a, "noise from a")
+	h.Handle(b, "/ignore "+h.Nick(a))
+	h.Handle(b, "/join chinese")
+	drain(b)
+	h.Handle(b, "/join general")
+	if has(drain(b), KindChat, "noise from a") {
+		t.Fatal("ignored user's history replayed")
+	}
+}
+
+func TestDurText(t *testing.T) {
+	for d, want := range map[time.Duration]string{24 * time.Hour: "24h", 30 * time.Minute: "30m", 90 * time.Second: "1m30s"} {
+		if _, en := durText(d); en != want {
+			t.Errorf("durText(%s) = %s, want %s", d, en, want)
+		}
+	}
+}
+
+func TestZoneCaseInsensitive(t *testing.T) {
+	for _, z := range []string{"utc+8", "gmt-5", "UTC+05:30"} {
+		if _, err := ParseZone(z); err != nil {
+			t.Errorf("%s: %v", z, err)
+		}
 	}
 }

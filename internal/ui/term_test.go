@@ -91,3 +91,24 @@ func TestTermRingsOnDM(t *testing.T) {
 		t.Fatal("no bell on private message")
 	}
 }
+
+func TestTermHistoryBatch(t *testing.T) {
+	tm := &Term{width: 80, height: 24, last: map[int]string{}, th: themeGreen}
+	tm.fmt = Formatter{Styled: true, Theme: themeGreen}
+	var batch []*chat.Event
+	for i := range 700 {
+		batch = append(batch, &chat.Event{ID: uint64(i + 1), Kind: chat.KindChat, From: "a", Text: "old", Time: time.Now(), History: true})
+	}
+	if !tm.addEvent(&chat.Event{Kind: chat.KindHistory, History: true, Batch: batch}) {
+		t.Fatal("history should refresh the status rows")
+	}
+	if len(tm.events) != maxEvents {
+		t.Fatalf("kept %d events, want %d", len(tm.events), maxEvents)
+	}
+	if tm.events[len(tm.events)-1].ID != 700 {
+		t.Fatal("newest replayed message not last")
+	}
+	if !strings.Contains(tm.out.String(), "old") {
+		t.Fatal("history not drawn")
+	}
+}

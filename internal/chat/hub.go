@@ -32,6 +32,7 @@ const (
 	KindError               // command error for this user only
 	KindNotice              // admin broadcast
 	KindMention             // someone @mentioned you in a room you're not in
+	KindHistory             // a room's history replayed on join, as one event (see Batch)
 )
 
 // Event is one line (or block) of output for a client.
@@ -49,8 +50,12 @@ type Event struct {
 	// already bilingual or language-neutral. User messages have no En.
 	En      string
 	LinesEn []string
-	History bool   // replayed from the room buffer on join
-	sender  uint64 // client ID of the author (never shown), for /forget
+	History bool // replayed from the room buffer on join
+	// Batch holds the replayed messages of a KindHistory event, oldest
+	// first. Replaying them as one event keeps a long history from
+	// overflowing the client's event buffer (where extra events are dropped).
+	Batch  []*Event
+	sender uint64 // client ID of the author (never shown), for /forget
 }
 
 // RoomDef describes a public room created at startup.
@@ -62,21 +67,24 @@ type RoomDef struct {
 
 // Config tunes the hub. Zero values are replaced with defaults in NewHub.
 type Config struct {
-	PublicRooms   []RoomDef
-	HistorySize   int           // messages kept per room
-	HistoryTTL    time.Duration // messages older than this are discarded
-	MaxMsgRunes   int
-	MaxClients    int
-	MaxConnsPerIP int           // concurrent sessions per address (IPv6: per /64)
-	ConnPerMinute int           // new sessions per address per minute
-	MsgBurst      float64       // token bucket size for messages
-	MsgPerSecond  float64       // token refill rate
-	NickCooldown  time.Duration // between /nick changes
-	MaxPrivate    int           // private rooms alive at once
-	IdleKick      time.Duration // drop sessions that haven't sent anything for this long (0 = never)
-	OnionMaxConns int           // concurrent sessions arriving via Tor (they share one key)
-	OnionPerMin   int           // new Tor sessions per minute
-	Motd          []string      // extra lines shown on connect
+	PublicRooms []RoomDef
+	HistorySize int           // messages kept per public room
+	HistoryTTL  time.Duration // messages older than this are discarded
+	// PrivateHistorySize caps the history of each private room (there can be
+	// MaxPrivate of them, so a smaller cap bounds memory).
+	PrivateHistorySize int
+	MaxMsgRunes        int
+	MaxClients         int
+	MaxConnsPerIP      int           // concurrent sessions per address (IPv6: per /64)
+	ConnPerMinute      int           // new sessions per address per minute
+	MsgBurst           float64       // token bucket size for messages
+	MsgPerSecond       float64       // token refill rate
+	NickCooldown       time.Duration // between /nick changes
+	MaxPrivate         int           // private rooms alive at once
+	IdleKick           time.Duration // drop sessions that haven't sent anything for this long (0 = never)
+	OnionMaxConns      int           // concurrent sessions arriving via Tor (they share one key)
+	OnionPerMin        int           // new Tor sessions per minute
+	Motd               []string      // extra lines shown on connect
 	// Facts about the deployment that /privacy reports to users.
 	PersistBans bool // address-hash key stored on disk (-ban-file)
 	TorEnabled  bool // an onion listener is configured
@@ -98,10 +106,13 @@ func (c *Config) defaults() {
 		}
 	}
 	if c.HistorySize <= 0 {
-		c.HistorySize = 50
+		c.HistorySize = DefaultHistorySize
 	}
 	if c.HistoryTTL <= 0 {
-		c.HistoryTTL = time.Hour
+		c.HistoryTTL = DefaultHistoryTTL
+	}
+	if c.PrivateHistorySize <= 0 {
+		c.PrivateHistorySize = min(c.HistorySize, 100)
 	}
 	if c.MaxMsgRunes <= 0 {
 		c.MaxMsgRunes = 500
@@ -137,6 +148,12 @@ func (c *Config) defaults() {
 		c.OnionPerMin = 120
 	}
 }
+
+// Room history defaults: chat stays readable for a day, in memory only.
+const (
+	DefaultHistorySize = 500
+	DefaultHistoryTTL  = 24 * time.Hour
+)
 
 // OnionKey is the address key shared by every session that arrives through
 // the Tor onion listener.
@@ -369,7 +386,7 @@ func (h *Hub) Shutdown(msg string) {
 		c.send(&Event{Kind: KindNotice, Text: "服务器正在重启，请稍后重新连接。", En: msg})
 	}
 	for _, c := range h.clients {
-		h.removeLocked(c, msg, "left")
+		h.removeLocked(c, bi("服务器重启", msg), "left")
 	}
 }
 
@@ -680,10 +697,19 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	c.seen[name] = r.seq
 	delete(c.mentioned, name)
 	r.history = h.pruneHistory(r.history, time.Now())
-	for _, ev := range r.history {
-		e := ev
-		e.History = true
-		c.send(&e)
+	if hist := r.history[max(0, len(r.history)-h.historyLimit(r)):]; len(hist) > 0 {
+		batch := make([]*Event, 0, len(hist))
+		for _, ev := range hist {
+			if c.ignores[ev.sender] {
+				continue
+			}
+			e := ev
+			e.History = true
+			batch = append(batch, &e)
+		}
+		if len(batch) > 0 {
+			c.send(&Event{Kind: KindHistory, Room: name, History: true, Batch: batch})
+		}
 	}
 	h.presenceLocked(r, c.nick, "joined", true) // tell the others; the joiner gets "Now in …"
 	r.members[c.ID] = c
@@ -757,8 +783,9 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 	h.eventID++
 	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, sender: c.ID}
 	r.history = append(r.history, *ev)
-	if len(r.history) > h.cfg.HistorySize {
-		r.history = append(r.history[:0:0], r.history[len(r.history)-h.cfg.HistorySize:]...)
+	limit := h.historyLimit(r)
+	if len(r.history) > limit+limit/4 { // trim in batches, not a copy per message
+		r.history = append(r.history[:0:0], r.history[len(r.history)-limit:]...)
 	}
 	for _, m := range r.members {
 		if !m.ignores[c.ID] {
@@ -1136,7 +1163,7 @@ func parseZone(s string) (*time.Location, error) {
 	return time.LoadLocation(s)
 }
 
-var tzOffset = regexp.MustCompile(`^(?:UTC|GMT)?([+-]?)(\d{1,2})(?::?(\d{2}))?$`)
+var tzOffset = regexp.MustCompile(`(?i)^(?:UTC|GMT)?([+-]?)(\d{1,2})(?::?(\d{2}))?$`)
 
 func (h *Hub) tzLocked(c *Client, arg string) {
 	if strings.TrimSpace(arg) == "" {
@@ -1316,29 +1343,31 @@ func (h *Hub) privacyLocked(c *Client) {
 		tor += "；用 Tor 浏览器直连也欢迎，Tor 用户共用一组宽松限额"
 		torEn += "; Tor Browser users are welcome and share generous limits"
 	}
-	idle, idleEn := "不限", "none"
+	idle, idleEn := "不会因为不发言而断开", "never disconnected for being quiet"
 	if h.cfg.IdleKick > 0 {
-		idle, idleEn = h.cfg.IdleKick.String(), h.cfg.IdleKick.String()
+		d, dEn := durText(h.cfg.IdleKick)
+		idle, idleEn = d+" 不发言自动断开", "disconnected after "+dEn+" without posting"
 	}
+	ttl, ttlEn := durText(h.cfg.HistoryTTL)
 	zh := []string{
-		fmt.Sprintf("消息   只在内存里，每个房间最多 %d 条、最长 %s，然后自动删除；私聊不保存", h.cfg.HistorySize, h.cfg.HistoryTTL),
+		fmt.Sprintf("消息   只在内存里，每个房间最多 %d 条、保留 %s，然后自动删除；服务器重启即清空；私聊不保存", h.cfg.HistorySize, ttl),
 		"不记录 IP、昵称、消息内容都不写入日志；不收集 SSH 公钥；没有账号",
 		"地址   只用来限流和封禁，以匿名哈希保存，不显示给任何人（包括管理员）",
 		"封禁   " + bans,
 		"Tor    " + tor,
-		"空闲   " + idle + " 不发言自动断开",
+		"空闲   " + idle,
 		"管理员 可以踢出、禁言、封禁（都会公开显示）；看不到私聊，聊天室里也没有查看 IP 的功能",
 		"删除   /forget 立刻从房间历史中删除你本次连接发过的所有消息",
 		"边界   SSH 只加密传输：服务器进程能看到明文，VPS 运营者在系统层面能看到连接来源 IP。",
 		"       想对运营者也隐藏 IP 请用 Tor；任何时候都不要发送能识别你身份的信息。",
 	}
 	en := []string{
-		fmt.Sprintf("Messages   memory only, at most %d per room for %s, then deleted; private messages are never stored", h.cfg.HistorySize, h.cfg.HistoryTTL),
+		fmt.Sprintf("Messages   memory only, at most %d per room, kept %s, then deleted; a restart wipes them; private messages are never stored", h.cfg.HistorySize, ttlEn),
 		"No logs    no IPs, nicknames or message text in logs; no SSH public keys collected; no accounts",
 		"Addresses  used only for rate limits and bans, kept as anonymous hashes, shown to no one (admins included)",
 		"Bans       " + bansEn,
 		"Tor        " + torEn,
-		"Idle       disconnected after " + idleEn + " without posting",
+		"Idle       " + idleEn,
 		"Admins     can kick, mute and ban (always shown publicly); can't read private messages; no IP lookup in the chat",
 		"Erase      /forget removes everything you posted this session from room history, now",
 		"Limits     SSH encrypts the connection only: the server process sees plaintext and the VPS operator sees source IPs.",
@@ -1460,6 +1489,27 @@ func (r *room) topicBi() string {
 		return r.topic
 	}
 	return bi(r.topic, r.topicEn)
+}
+
+// historyLimit is how many messages room r keeps (and replays).
+func (h *Hub) historyLimit(r *room) int {
+	if r.private {
+		return h.cfg.PrivateHistorySize
+	}
+	return h.cfg.HistorySize
+}
+
+// durText renders a duration for people: "24 小时" / "24h", "30 分钟" / "30m".
+func durText(d time.Duration) (zh, en string) {
+	switch {
+	case d >= time.Hour && d%time.Hour == 0:
+		n := int(d / time.Hour)
+		return fmt.Sprintf("%d 小时", n), fmt.Sprintf("%dh", n)
+	case d >= time.Minute && d%time.Minute == 0:
+		n := int(d / time.Minute)
+		return fmt.Sprintf("%d 分钟", n), fmt.Sprintf("%dm", n)
+	}
+	return d.String(), d.String()
 }
 
 func (h *Hub) pruneHistory(hist []Event, now time.Time) []Event {

@@ -65,11 +65,11 @@ sudo vivant-ctl uninstall --purge # 彻底删除
 
 ```bash
 # 方式一：在自己电脑上一条命令部署到服务器（Linux、macOS，或 Windows 的 Git Bash / WSL）
-bash vivant-v0.9.6-linux-offline.sh --to root@服务器
+bash vivant-v0.9.7-linux-offline.sh --to root@服务器
 
 # 方式二：先把文件传到服务器，再在服务器上运行
-scp vivant-v0.9.6-linux-offline.sh root@服务器:
-sudo bash vivant-v0.9.6-linux-offline.sh
+scp vivant-v0.9.7-linux-offline.sh root@服务器:
+sudo bash vivant-v0.9.7-linux-offline.sh
 ```
 
 后面可以跟和在线安装一样的参数，例如 `--to root@服务器 --port 2222 --admin-key ~/.ssh/id_ed25519.pub`（方式一里公钥文件路径指的是服务器上的路径，离线时请先把公钥传上去，或用方式二）。`--to` 用的是你电脑上的 ssh/scp，服务器上的用户不是 root 时会自动用 sudo。
@@ -161,7 +161,7 @@ sudo vivant-ctl status        # 输出里的 Host key: SHA256:…
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | 额外监听地址，逗号分隔（`--alt-port 443` 设为 `:443`） |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | 定期下载 Tor 出口节点列表，让 Tor 用户共用宽松限额；`off` 关闭 |
 | `-quiet-above` | 20 | 房间超过这个人数后，进出提示改为每 30 秒汇总一次（-1 = 不汇总） |
-| `-history` / `-history-ttl` | 50 / 1h | 每房间历史条数和保留时长 |
+| `-history` / `-history-ttl` | 500 / 24h | 每房间历史条数和保留时长（只在内存，重启清空；私人房间最多 100 条） |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | 连接限制 |
 | `-read-rate` | 32768 | 每个连接每秒最多发来多少字节，超出会被放慢而不是断开（突发 8 倍；0 = 不限）。正常打字和粘贴远远用不到 |
 | `-msg-rate` / `-msg-burst` / `-max-len` | 1/s / 5 / 500 | 发言限制 |

@@ -65,11 +65,11 @@ Every release includes an offline one-click installer, `vivant-<version>-linux-o
 
 ```bash
 # Option 1: deploy to the server with one command from your computer (Linux, macOS, or Git Bash / WSL on Windows)
-bash vivant-v0.9.6-linux-offline.sh --to root@SERVER
+bash vivant-v0.9.7-linux-offline.sh --to root@SERVER
 
 # Option 2: copy the file to the server and run it there
-scp vivant-v0.9.6-linux-offline.sh root@SERVER:
-sudo bash vivant-v0.9.6-linux-offline.sh
+scp vivant-v0.9.7-linux-offline.sh root@SERVER:
+sudo bash vivant-v0.9.7-linux-offline.sh
 ```
 
 Add the same options as the online installer, e.g. `--to root@SERVER --port 2222 --admin-key ~/.ssh/id_ed25519.pub` (with option 1 a key file path refers to the server, so copy the key there first or use option 2). `--to` uses the ssh/scp on your computer; if the server user isn't root it uses sudo.
@@ -161,7 +161,7 @@ Config file `/etc/vivant.env`; after editing run `systemctl restart vivant`:
 | `VIVANT_ALT_ADDR` / `-alt-addr` | — | extra listen addresses, comma separated (`--alt-port 443` sets `:443`) |
 | `VIVANT_TOR_EXITS` / `-tor-exits` | `on` | download Tor's exit list so Tor users share the generous limits; `off` disables |
 | `-quiet-above` | 20 | above this many people, join/leave lines become a summary every 30 s (-1 = never) |
-| `-history` / `-history-ttl` | 50 / 1h | messages kept per room, and for how long |
+| `-history` / `-history-ttl` | 500 / 24h | messages kept per room, and for how long (memory only, cleared on restart; private rooms keep at most 100) |
 | `-max-clients` / `-max-per-ip` / `-max-tcp-per-ip` / `-conn-per-min` | 1000 / 3 / 8 / 10 | connection limits |
 | `-read-rate` | 32768 | bytes per second a connection may send before it's slowed down, not dropped (burst 8×; 0 = off). Typing and pasting never get near it |
 | `-msg-rate` / `-msg-burst` / `-max-len` | 1/s / 5 / 500 | posting limits |

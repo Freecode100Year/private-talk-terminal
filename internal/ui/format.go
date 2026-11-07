@@ -60,6 +60,7 @@ type renderKey struct {
 	loc   *time.Location
 	theme *Theme
 	hist  bool
+	day   int // viewer's current day: older messages are shown with a date
 }
 
 var (
@@ -102,6 +103,9 @@ func (f Formatter) Lines(ev chat.Event) []string {
 		loc = f.Loc()
 	}
 	k := renderKey{id: ev.ID, loc: loc, theme: f.th(), hist: ev.History}
+	if ev.History {
+		k.day = dayNumber(time.Now(), loc)
+	}
 	if v, ok := renderCache.Load(k); ok {
 		return v.([]string)
 	}
@@ -138,7 +142,12 @@ func (f Formatter) lines(ev chat.Event) []string {
 		}
 	}
 	th := f.th()
-	ts := f.st(th.Dim, "["+t.Format("15:04")+"] ")
+	stamp := t.Format("15:04")
+	// History is kept for a day: a time alone would be ambiguous.
+	if now := time.Now().In(t.Location()); ev.History && (t.YearDay() != now.YearDay() || t.Year() != now.Year()) {
+		stamp = t.Format("01-02 15:04")
+	}
+	ts := f.st(th.Dim, "["+stamp+"] ")
 	self := ""
 	if f.Self != nil {
 		self = f.Self()
@@ -215,6 +224,14 @@ func (f Formatter) lines(ev chat.Event) []string {
 		}
 	}
 	return out
+}
+
+// dayNumber identifies the calendar day of t in loc (nil = server local).
+func dayNumber(t time.Time, loc *time.Location) int {
+	if loc != nil {
+		t = t.In(loc)
+	}
+	return t.Year()*1000 + t.YearDay()
 }
 
 // highlightTags styles every "@nick" in text, so a mention of someone stands
