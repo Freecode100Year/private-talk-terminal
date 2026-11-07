@@ -91,7 +91,7 @@ func TestAgentPacing(t *testing.T) {
 	for got < 8 {
 		select {
 		case ev := <-human.Out:
-			if ev.Kind == chat.KindChat && ev.Bot {
+			if ev.Kind == chat.KindChat && ev.From == hub.Nick(bot) {
 				got++
 			}
 		case <-deadline:
@@ -124,7 +124,7 @@ func TestAgentFlushesOnEOF(t *testing.T) {
 	for {
 		select {
 		case ev := <-human.Out:
-			if ev.Kind == chat.KindChat && ev.Bot {
+			if ev.Kind == chat.KindChat && ev.From == hub.Nick(bot) {
 				got++
 			}
 			continue

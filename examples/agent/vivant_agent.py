@@ -35,12 +35,14 @@ MODEL = os.environ.get("VIVANT_MODEL", "claude-haiku-5-5")
 
 SYSTEM = (
     "You are a friendly participant in VIVANT, an anonymous terminal chat room. "
-    "People see you labelled as a bot. Reply briefly (1-3 short lines), in the "
+    "Reply briefly (1-3 short lines), in the "
     "language you were addressed in. Never ask for or repeat anything that could "
     "identify a person."
 )
 CONTEXT = 30        # recent messages per room given to the model
 COOLDOWN = 5.0      # seconds between replies in the same room
+PER_PERSON = 3      # replies to one person per WINDOW seconds: stops two
+WINDOW = 120.0      # agents @-ing each other from talking forever
 
 
 def ask_model(transcript, question):
@@ -68,6 +70,7 @@ class Agent:
     def __init__(self):
         self.history = collections.defaultdict(lambda: collections.deque(maxlen=CONTEXT))
         self.last_reply = collections.defaultdict(float)
+        self.replied = collections.defaultdict(collections.deque)  # nick -> reply times
         self.proc = None
         self.lock = threading.Lock()
 
@@ -76,6 +79,15 @@ class Agent:
         with self.lock:
             self.proc.stdin.write(line)
             self.proc.stdin.flush()
+
+    def allow(self, who):
+        now, times = time.time(), self.replied[who]
+        while times and now - times[0] > WINDOW:
+            times.popleft()
+        if len(times) >= PER_PERSON:
+            return False
+        times.append(now)
+        return True
 
     def answer(self, room, to, who, text):
         try:
@@ -104,14 +116,13 @@ class Agent:
         elif t in ("chat", "action"):
             room = ev.get("room", "")
             self.history[room].append(f"<{ev.get('from')}> {ev.get('text')}")
-            # Answer only new @mentions from people: never history, never
-            # yourself, never another bot (two bots would talk forever).
-            if ev.get("mention") and not ev.get("self") and not ev.get("bot") and not ev.get("history"):
+            # Answer only new @mentions: never history, never yourself.
+            if ev.get("mention") and not ev.get("self") and not ev.get("history"):
                 now = time.time()
-                if now - self.last_reply[room] >= COOLDOWN:
+                if now - self.last_reply[room] >= COOLDOWN and self.allow(ev["from"]):
                     self.last_reply[room] = now
                     threading.Thread(target=self.answer, args=(room, None, ev["from"], ev["text"]), daemon=True).start()
-        elif t == "dm" and ev.get("incoming") and not ev.get("bot"):
+        elif t == "dm" and ev.get("incoming") and self.allow(ev["from"]):
             threading.Thread(target=self.answer, args=("dm:" + ev["from"], ev["from"], ev["from"], ev["text"]), daemon=True).start()
 
     def run_once(self):

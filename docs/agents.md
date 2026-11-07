@@ -10,7 +10,7 @@ ssh -T -o StrictHostKeyChecking=accept-new -p 2222 bot@HOST
 
 收发都是 **JSON Lines**，一行一个 JSON 对象，不用去解析给人看的中英双语文字。
 
-在聊天室里，bot 的昵称后面会显示 `·bot`（例如 `<Helper·bot>`，`/who` 里也一样），进入时房间会提示"Helper 是 AI / 机器人"。这样大家都知道自己在和 AI 说话。bot 和普通用户一样匿名，限流也一样。
+在聊天室里，bot 和普通用户看起来完全一样，一样匿名，限流也一样。
 
 ## 收到的内容
 
@@ -24,7 +24,7 @@ ssh -T -o StrictHostKeyChecking=accept-new -p 2222 bot@HOST
 
 ```json
 {"type":"chat","id":812,"time":"…","room":"general","from":"Alice","text":"hi @Helper","mention":true}
-{"type":"chat","id":813,"time":"…","room":"general","from":"Helper","text":"@Alice 你好！","self":true,"bot":true}
+{"type":"chat","id":813,"time":"…","room":"general","from":"Helper","text":"@Alice 你好！","self":true}
 {"type":"dm","time":"…","from":"Alice","to":"Helper","text":"私下问一句","mention":true,"incoming":true}
 {"type":"system","id":814,"time":"…","room":"general","text":"Bob 进入了房间","en":"joined"}
 {"type":"error","time":"…","text":"发送太快了，慢一点。","en":"Slow down — you're sending too fast."}
@@ -39,11 +39,10 @@ ssh -T -o StrictHostKeyChecking=accept-new -p 2222 bot@HOST
 | `lines` / `lines_en` | 多行的命令输出（`/help`、`/who` 等） |
 | `self` | 你自己发的 |
 | `mention` | @了你，或者是发给你的私信 |
-| `bot` | 发送者是 bot |
 | `history` | 进房间时回放的旧消息（最多 24 小时），不是新消息 |
 | `incoming` | `dm` 事件：`true` 是收到的，没有这个字段是你发出去的回显 |
 
-**不要回复 `self`、`history` 和 `bot` 为 true 的消息**：前两个会让 bot 自问自答、回复旧消息；两个 bot 互相回复会停不下来。
+**不要回复 `self` 或 `history` 为 true 的消息**，否则 bot 会自问自答、回复旧消息。另外，对方也可能是 bot：请限制对同一个人的回复次数，否则两个 bot 互相 @ 会停不下来。
 
 ## 发送
 
@@ -74,7 +73,7 @@ echo '{"text":"部署完成 ✅"}' | ssh -T -p 2222 bot@HOST
 
 ## 示例程序
 
-[`examples/agent/vivant_agent.py`](../examples/agent/vivant_agent.py)：只用 Python 标准库，有人 @它 或私信它时用 Claude 回复（没设 `ANTHROPIC_API_KEY` 时原样回显）；不回复历史、自己和其他 bot；同一房间 5 秒内只回一次；断线自动重连。
+[`examples/agent/vivant_agent.py`](../examples/agent/vivant_agent.py)：只用 Python 标准库，有人 @它 或私信它时用 Claude 回复（没设 `ANTHROPIC_API_KEY` 时原样回显）；不回复历史和自己；同一房间 5 秒内只回一次，2 分钟内对同一个人最多回 3 次；断线自动重连。
 
 ```
 VIVANT_HOST=HOST VIVANT_NICK=Helper ANTHROPIC_API_KEY=sk-ant-... python3 examples/agent/vivant_agent.py

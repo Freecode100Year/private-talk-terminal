@@ -51,7 +51,6 @@ type Event struct {
 	En      string
 	LinesEn []string
 	History bool // replayed from the room buffer on join
-	Bot     bool // the author is an AI agent / bot (connected in bot mode)
 	// Batch holds the replayed messages of a KindHistory event, oldest
 	// first. Replaying them as one event keeps a long history from
 	// overflowing the client's event buffer (where extra events are dropped).
@@ -211,19 +210,9 @@ type Client struct {
 	mentioned   map[string]bool   // rooms where the client was @mentioned while away
 	noBell      bool              // /bell off
 	theme       string            // /theme: ThemeGreen (default), ThemeDark or ThemeLight
-	bot         bool              // connected in bot mode: messages are labelled as a bot's
 }
 
 // Reason is the kick/ban reason after Done is closed (empty for normal exit).
-// label is the nick as others see it in presence lines and /who.
-// Callers hold Hub.mu.
-func (c *Client) label() string {
-	if c.bot {
-		return c.nick + "·bot"
-	}
-	return c.nick
-}
-
 func (c *Client) Reason() string { return c.reason }
 
 func (c *Client) close(reason string) {
@@ -375,7 +364,7 @@ func (h *Hub) removeLocked(c *Client, reason, verb string) {
 	}
 	if r := h.rooms[c.room]; r != nil {
 		delete(r.members, c.ID)
-		h.presenceLocked(r, c.label(), verb, verb == "left" || verb == "timed out")
+		h.presenceLocked(r, c.nick, verb, verb == "left" || verb == "timed out")
 		h.gcRoomLocked(r)
 	}
 	delete(h.clients, c.ID)
@@ -701,7 +690,7 @@ func (h *Hub) joinLocked(c *Client, name string) {
 	if old := h.rooms[c.room]; old != nil {
 		c.seen[old.name] = old.seq
 		delete(old.members, c.ID)
-		h.presenceLocked(old, c.label(), "left for another room", true)
+		h.presenceLocked(old, c.nick, "left for another room", true)
 		h.gcRoomLocked(old)
 	}
 	r := h.rooms[name]
@@ -723,7 +712,7 @@ func (h *Hub) joinLocked(c *Client, name string) {
 			c.send(&Event{Kind: KindHistory, Room: name, History: true, Batch: batch})
 		}
 	}
-	h.presenceLocked(r, c.label(), "joined", true) // tell the others; the joiner gets "Now in …"
+	h.presenceLocked(r, c.nick, "joined", true) // tell the others; the joiner gets "Now in …"
 	r.members[c.ID] = c
 	topic, topicEn := r.topic, r.topicEn
 	if topicEn == "" {
@@ -793,7 +782,7 @@ func (h *Hub) sayLocked(c *Client, text string, kind Kind) {
 	r := h.rooms[c.room]
 	r.seq++
 	h.eventID++
-	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, Bot: c.bot, sender: c.ID}
+	ev := &Event{ID: h.eventID, Time: time.Now(), Kind: kind, Room: r.name, From: c.nick, Text: text, sender: c.ID}
 	r.history = append(r.history, *ev)
 	limit := h.historyLimit(r)
 	if len(r.history) > limit+limit/4 { // trim in batches, not a copy per message
@@ -839,7 +828,7 @@ func (h *Hub) notifyMentionsLocked(c *Client, r *room, ev *Event) {
 		}
 		notified[t.ID] = true
 		t.mentioned[r.name] = true
-		t.send(&Event{Time: ev.Time, Kind: KindMention, Room: r.name, From: c.nick, Text: ev.Text, Bot: c.bot})
+		t.send(&Event{Time: ev.Time, Kind: KindMention, Room: r.name, From: c.nick, Text: ev.Text})
 	}
 }
 
@@ -864,9 +853,9 @@ func (h *Hub) dmLocked(c *Client, target, text string) {
 	now := time.Now()
 	if !to.ignores[c.ID] { // ignored senders aren't told, so ignoring can't be probed
 		to.lastDMFrom = c.nick
-		to.send(&Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text, Bot: c.bot})
+		to.send(&Event{Time: now, Kind: KindDMIn, From: c.nick, To: to.nick, Text: text})
 	}
-	c.send(&Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text, Bot: c.bot})
+	c.send(&Event{Time: now, Kind: KindDMOut, From: c.nick, To: to.nick, Text: text})
 }
 
 func (h *Hub) nickLocked(c *Client, n string) {
@@ -907,14 +896,14 @@ func (h *Hub) nickLocked(c *Client, n string) {
 			o.lastDMFrom = n
 		}
 	}
-	h.roomSystemLocked(h.rooms[c.room], fmt.Sprintf("%s 改名为 %s", old, c.label()), "renamed")
+	h.roomSystemLocked(h.rooms[c.room], fmt.Sprintf("%s 改名为 %s", old, c.nick), "renamed")
 }
 
 func (h *Hub) whoLocked(c *Client) {
 	r := h.rooms[c.room]
 	names := make([]string, 0, len(r.members))
 	for _, m := range r.members {
-		names = append(names, m.label())
+		names = append(names, m.nick)
 	}
 	sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
 	more := 0
@@ -1334,20 +1323,6 @@ func (h *Hub) SetTheme(c *Client, name string) {
 }
 
 // BellOn reports whether the client wants a bell on mentions and DMs.
-// SetBot marks c as an AI agent or bot: its messages are labelled "·bot"
-// so people in the room know who they're talking to, and the room is told.
-func (h *Hub) SetBot(c *Client) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.clients[c.ID]; !ok || c.bot {
-		return
-	}
-	c.bot = true
-	if r := h.rooms[c.room]; r != nil {
-		h.roomSystemLocked(r, c.nick+" 是 AI / 机器人", c.nick+" is an AI agent / bot")
-	}
-}
-
 func (h *Hub) BellOn(c *Client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -1620,7 +1595,6 @@ type Status struct {
 	Bell      bool // ring on @mentions and private messages
 	Loc       *time.Location
 	Theme     string // ThemeGreen (default), ThemeDark or ThemeLight
-	Bot       bool   // connected in bot mode
 }
 
 // Status returns the current view of the world for client c.
@@ -1637,7 +1611,6 @@ func (h *Hub) Status(c *Client) Status {
 		Loc:    c.loc,
 		Bell:   !c.noBell,
 		Theme:  c.theme,
-		Bot:    c.bot,
 	}
 	if s.Theme == "" {
 		s.Theme = themeOrder[0]

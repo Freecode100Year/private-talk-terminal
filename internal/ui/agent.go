@@ -15,8 +15,7 @@ import (
 
 // Agent runs a bot-mode session (`ssh -T bot@host`): one JSON object per
 // line in both directions, so an AI agent or script never has to parse the
-// human-oriented, bilingual chat lines. The session is marked as a bot, and
-// its messages are labelled "·bot" for everyone else.
+// human-oriented, bilingual chat lines. In the room it looks like anyone else.
 //
 // Output: see AgentEvent. Input, one per line, either
 //
@@ -28,7 +27,6 @@ import (
 //	{"cmd":"/who"}        one command
 //	{"type":"ping"}       answered with {"type":"pong"} (doesn't count as activity)
 func Agent(rw io.ReadWriter, hub *chat.Hub, c *chat.Client) {
-	hub.SetBot(c)
 	a := &agent{w: rw, hub: hub, c: c, enc: json.NewEncoder(rw)}
 	cfg := hub.Config()
 	st := hub.Status(c)
@@ -132,7 +130,6 @@ type AgentEvent struct {
 	LinesEn []string     `json:"lines_en,omitempty"`
 	Self    bool         `json:"self,omitempty"`     // you sent it
 	Mention bool         `json:"mention,omitempty"`  // it @mentions you, or is a private message to you
-	Bot     bool         `json:"bot,omitempty"`      // the author is a bot
 	History bool         `json:"history,omitempty"`  // replayed on join, not new
 	In      bool         `json:"incoming,omitempty"` // dm: true = received, false = your own, echoed
 	Limits  *agentLimits `json:"limits,omitempty"`
@@ -164,7 +161,7 @@ func (a *agent) emitEvent(ev *chat.Event) {
 	self := a.hub.Nick(a.c)
 	e := AgentEvent{
 		Type: agentKinds[ev.Kind], ID: ev.ID, Time: ev.Time, Room: ev.Room, From: ev.From, To: ev.To,
-		Text: ev.Text, En: ev.En, Lines: ev.Lines, LinesEn: ev.LinesEn, Bot: ev.Bot, History: ev.History,
+		Text: ev.Text, En: ev.En, Lines: ev.Lines, LinesEn: ev.LinesEn, History: ev.History,
 	}
 	if e.Type == "" {
 		return

@@ -476,7 +476,7 @@ func dialAs(t *testing.T, addr, user string) *gossh.Client {
 	return c
 }
 
-// Bot mode end to end: JSON in, JSON out, the bot is labelled for humans,
+// Bot mode end to end: JSON in, JSON out, the bot looks like anyone else,
 // and a long multi-line reply arrives as several paced messages.
 func TestAgentMode(t *testing.T) {
 	addr := startServer(t)
@@ -486,7 +486,6 @@ func TestAgentMode(t *testing.T) {
 
 	inB, outB := plainSession(t, dialAs(t, addr, "bot"))
 	waitFor(t, outB, `"type":"hello"`)
-	waitFor(t, outH, "is an AI agent / bot")
 	io.WriteString(inB, `{"cmd":"/nick Helper"}`+"\n")
 	waitFor(t, outB, "Helper")
 
@@ -495,9 +494,9 @@ func TestAgentMode(t *testing.T) {
 
 	long := strings.Repeat("word ", 150) // 750 runes: two messages
 	io.WriteString(inB, `{"text":"first line\n`+long+`"}`+"\n")
-	waitFor(t, outH, "<Helper·bot> first line")
-	waitFor(t, outH, "<Helper·bot> word word")
-	waitFor(t, outH, "<Helper·bot> word word")
+	waitFor(t, outH, "<Helper> first line")
+	waitFor(t, outH, "<Helper> word word")
+	waitFor(t, outH, "<Helper> word word")
 
 	io.WriteString(inB, `{"type":"ping"}`+"\n")
 	waitFor(t, outB, `"type":"pong"`)
